@@ -149,6 +149,42 @@ class FirestoreSyncManager(private val context: Context) {
         }
     }
 
+    /**
+     * Uploads historical breadcrumbs in Firestore batches. A false result means none of
+     * the supplied points should be marked synced by the caller.
+     */
+    suspend fun syncLocationBatch(points: List<LocationPoint>): Boolean {
+        if (points.isEmpty()) return true
+        if (auth.currentUser == null) return false
+        return try {
+            points.chunked(450).forEach { chunk ->
+                val batch = firestore.batch()
+                chunk.forEach { point ->
+                    val data = hashMapOf(
+                        "id" to point.id,
+                        "truckId" to point.truckId,
+                        "latitude" to point.latitude,
+                        "longitude" to point.longitude,
+                        "speedKmh" to point.speedKmh,
+                        "accuracyMeters" to point.accuracyMeters,
+                        "timestamp" to point.timestamp
+                    )
+                    batch.set(
+                        firestore.collection("location_points")
+                            .document("loc_${point.truckId}_${point.timestamp}"),
+                        data,
+                        SetOptions.merge()
+                    )
+                }
+                batch.commit().await()
+            }
+            true
+        } catch (e: Exception) {
+            Log.w("FirestoreSync", "Location batch upload failed: ${e.message}")
+            false
+        }
+    }
+
     suspend fun syncStop(stop: StopRecord) {
         if (auth.currentUser == null) return
         try {
