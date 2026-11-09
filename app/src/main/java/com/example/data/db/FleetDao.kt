@@ -95,6 +95,21 @@ interface FleetDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLocationPoint(point: LocationPoint): Long
 
+    @Query("SELECT * FROM location_points WHERE isSynced = 0 ORDER BY timestamp ASC LIMIT 200")
+    suspend fun getPendingLocationPoints(): List<LocationPoint>
+
+    @Query("UPDATE location_points SET isSynced = 1, retryCount = 0 WHERE id IN (:ids)")
+    suspend fun markLocationPointsSynced(ids: List<Long>)
+
+    @Query("UPDATE location_points SET retryCount = retryCount + 1 WHERE id IN (:ids)")
+    suspend fun incrementLocationRetryCount(ids: List<Long>)
+
+    @Query("SELECT COUNT(*) FROM location_points WHERE isSynced = 0")
+    suspend fun getPendingLocationCount(): Int
+
+    @Query("DELETE FROM location_points WHERE isSynced = 1 AND timestamp < :cutoffTimestamp")
+    suspend fun deleteSyncedLocationPointsBefore(cutoffTimestamp: Long): Int
+
     // Stop Records
     @Query("SELECT * FROM stop_records WHERE truckId = :truckId ORDER BY startTime DESC")
     fun getStopsForTruck(truckId: Int): Flow<List<StopRecord>>
