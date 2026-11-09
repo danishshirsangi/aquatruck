@@ -51,6 +51,7 @@ class LocationTrackingService : Service() {
     private var previousLocation: Location? = null
     private var stationarySamples = 0
     private var lastNotificationStatus: String? = null
+    private var lastTruckSyncAt: Long = 0L
 
     // Automatic Drop Point Detection (Still or within 100 meters for 2 minutes / 120s)
     private var anchorLat: Double = 0.0
@@ -241,6 +242,14 @@ class LocationTrackingService : Service() {
                 status = status,
                 timestamp = now
             )
+
+            // Sync the live truck document at most once per minute. Breadcrumbs use the batch queue.
+            if (now - lastTruckSyncAt >= 60_000L) {
+                dao.getTruckByIdDirect(activeTruckId)?.let { truck ->
+                    com.example.data.firebase.FirestoreSyncManager(applicationContext).syncTruck(truck)
+                }
+                lastTruckSyncAt = now
+            }
 
             // Keep the live document lightweight; historical breadcrumbs are batch-synced separately.
             val notificationStatus = if (speedKmh > STATIONARY_SPEED_KMH) "En Route" else "At Stop / Drop Point"
