@@ -1,0 +1,6 @@
+{
+  "name": "AquaTrack",
+  "description": "Commercial water transport fleet management: 5-truck continuous background tracking, driver selfie attendance, delivery proof logging, and manager operations dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

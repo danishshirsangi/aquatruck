@@ -1,0 +1,92 @@
+{
+  "entities": {
+    "trucks": {
+      "title": "Trucks",
+      "description": "Fleet of water transport trucks managed by manager and operated by drivers",
+      "type": "object",
+      "properties": {
+        "truckNumber": { "type": "number", "description": "Truck identifier number (e.g. 1, 2)" },
+        "name": { "type": "string", "description": "Display name of tanker truck" },
+        "plateNumber": { "type": "string", "description": "Vehicle registration plate" },
+        "driverName": { "type": "string", "description": "Currently assigned driver name" },
+        "capacityLiters": { "type": "number", "description": "Tank capacity in Liters" },
+        "currentLat": { "type": "number", "description": "Current latitude coordinate" },
+        "currentLng": { "type": "number", "description": "Current longitude coordinate" },
+        "currentSpeedKmh": { "type": "number", "description": "Current vehicle speed in km/h" },
+        "isShiftActive": { "type": "boolean", "description": "Whether truck is currently on duty" },
+        "statusText": { "type": "string", "description": "Status summary text" }
+      },
+      "required": ["truckNumber", "name", "plateNumber", "capacityLiters"]
+    },
+    "drivers": {
+      "title": "Drivers",
+      "description": "Registered drivers who can log into trucks",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Driver full name" },
+        "phone": { "type": "string", "description": "Contact phone number" },
+        "assignedTruckId": { "type": "number", "description": "Default assigned truck ID" }
+      },
+      "required": ["name"]
+    },
+    "attendance": {
+      "title": "Attendance",
+      "description": "Daily driver selfie attendance logs",
+      "type": "object",
+      "properties": {
+        "truckId": { "type": "number", "description": "Truck ID" },
+        "driverName": { "type": "string", "description": "Driver name" },
+        "selfieUri": { "type": "string", "description": "Selfie image URI or base64" },
+        "checkInTime": { "type": "number", "description": "Check in epoch timestamp" },
+        "checkOutTime": { "type": "number", "description": "Check out epoch timestamp" },
+        "isCompleted": { "type": "boolean", "description": "Whether shift is finished" }
+      },
+      "required": ["truckId", "driverName", "checkInTime"]
+    },
+    "voice_delivery_notes": {
+      "title": "Voice Delivery Notes",
+      "description": "Audio recordings of deliveries made by drivers at customer points",
+      "type": "object",
+      "properties": {
+        "truckId": { "type": "number", "description": "Truck ID that delivered" },
+        "driverName": { "type": "string", "description": "Driver who recorded" },
+        "audioFilePath": { "type": "string", "description": "Local path or audio URI" },
+        "durationSeconds": { "type": "number", "description": "Audio duration in seconds" },
+        "latitude": { "type": "number", "description": "GPS latitude of delivery point" },
+        "longitude": { "type": "number", "description": "GPS longitude of delivery point" },
+        "locationLabel": { "type": "string", "description": "Label of delivery spot" },
+        "timestamp": { "type": "number", "description": "Timestamp of recording" }
+      },
+      "required": ["truckId", "driverName", "audioFilePath", "latitude", "longitude"]
+    },
+    "location_points": {
+      "title": "Location Breadcrumbs",
+      "description": "Periodic GPS coordinates logged during active shifts",
+      "type": "object",
+      "properties": {
+        "truckId": { "type": "number", "description": "Truck ID" },
+        "latitude": { "type": "number", "description": "Latitude" },
+        "longitude": { "type": "number", "description": "Longitude" },
+        "speedKmh": { "type": "number", "description": "Speed in km/h" },
+        "timestamp": { "type": "number", "description": "Timestamp" }
+      },
+      "required": ["truckId", "latitude", "longitude", "timestamp"]
+    },
+    "stop_records": {
+      "title": "Stop Records",
+      "description": "Halts and delivery stops detected during shifts",
+      "type": "object",
+      "properties": {
+        "truckId": { "type": "number", "description": "Truck ID" },
+        "latitude": { "type": "number", "description": "Latitude" },
+        "longitude": { "type": "number", "description": "Longitude" },
+        "startTime": { "type": "number", "description": "Stop arrival timestamp" },
+        "endTime": { "type": "number", "description": "Stop departure timestamp" },
+        "durationMinutes": { "type": "number", "description": "Duration in minutes" },
+        "addressOrLabel": { "type": "string", "description": "Location description" },
+        "category": { "type": "string", "description": "Stop category" }
+      },
+      "required": ["truckId", "latitude", "longitude", "startTime", "endTime"]
+    }
+  }
+}

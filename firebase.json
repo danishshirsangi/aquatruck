@@ -1,0 +1,8 @@
+{
+  "firestore": [
+    {
+      "database": "ai-studio-android-aquatrac-ae0f6f83-854d-4712-bbed-b747ec9132c0",
+      "rules": "firestore.rules"
+    }
+  ]
+}

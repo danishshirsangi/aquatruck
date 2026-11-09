@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">AquaTrack</string>
+    <string name="tracking_service_name">AquaTrack Fleet Service</string>
+    <string name="tracking_notification_channel_name">Fleet Shift Tracking</string>
+    <string name="tracking_notification_channel_desc">Active background GPS location tracking for water transport trucks</string>
+</resources>
