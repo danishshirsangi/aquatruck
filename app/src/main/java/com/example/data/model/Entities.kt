@@ -1,5 +1,6 @@
 package com.example.data.model
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -48,7 +49,9 @@ data class LocationPoint(
     val longitude: Double,
     val speedKmh: Float,
     val accuracyMeters: Float = 5f,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val retryCount: Int = 0
 )
 
 @Entity(tableName = "stop_records")
