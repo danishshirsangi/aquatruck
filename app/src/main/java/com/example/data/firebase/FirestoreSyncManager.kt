@@ -171,7 +171,7 @@ class FirestoreSyncManager(private val context: Context) {
                     )
                     batch.set(
                         firestore.collection("location_points")
-                            .document("loc_${point.truckId}_${point.id}"),
+                            .document("loc_${point.truckId}_${point.timestamp}"),
                         data,
                         SetOptions.merge()
                     )
