@@ -65,13 +65,25 @@ object TenantManager {
             !role(context).isNullOrBlank()
     }
 
-    private suspend fun rememberMembership(context: Context, orgId: String, memberRole: String, name: String, code: String? = null, assignedTruckId: Int? = null) {
+    private suspend fun rememberMembership(
+        context: Context,
+        orgId: String,
+        memberRole: String,
+        name: String,
+        code: String? = null,
+        assignedTruckId: Int? = null,
+        preserveLegacyPilotData: Boolean = false
+    ) {
         val currentUid = Firebase.auth.currentUser?.uid
             ?: throw IllegalStateException("Sign in before selecting a business.")
         val previousOrgId = organizationId(context)
         val previousUid = prefs(context).getString(KEY_UID, null)
-        if ((!previousOrgId.isNullOrBlank() && previousOrgId != orgId) ||
-            (!previousUid.isNullOrBlank() && previousUid != currentUid)) {
+        val isFirstManagerRegistrationWithLegacyPilot =
+            preserveLegacyPilotData && previousUid == null && previousOrgId.isNullOrBlank()
+        val membershipChanged =
+            previousUid != currentUid ||
+            (!previousOrgId.isNullOrBlank() && previousOrgId != orgId)
+        if (membershipChanged && !isFirstManagerRegistrationWithLegacyPilot) {
             // A device can be shared or change signed-in accounts. Do not let the next
             // business inherit the previous business's local fleet/history cache.
             runCatching {
@@ -209,7 +221,14 @@ object TenantManager {
         ))
         batch.commit().await()
 
-        rememberMembership(context, orgRef.id, "manager", businessName.trim(), code)
+        rememberMembership(
+            context,
+            orgRef.id,
+            "manager",
+            businessName.trim(),
+            code,
+            preserveLegacyPilotData = true
+        )
         prefs(context).edit().putString(KEY_PIN_SALT, salt).putString(KEY_PIN_HASH, hash).apply()
 
         // Carry forward the locally available pilot fleet into the new first business workspace.
