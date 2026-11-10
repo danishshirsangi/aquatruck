@@ -45,8 +45,10 @@ abstract class AppDatabase : RoomDatabase() {
 
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_location_points_isSynced_timestamp ON location_points(isSynced, timestamp)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_location_points_truckId_timestamp ON location_points(truckId, timestamp)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_location_points_timestamp ON location_points(timestamp)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_stop_records_isSynced_startTime ON stop_records(isSynced, startTime)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS index_stop_records_truckId_startTime ON stop_records(truckId, startTime)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_stop_records_startTime ON stop_records(startTime)")
             }
         }
 
