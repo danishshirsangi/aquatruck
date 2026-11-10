@@ -53,6 +53,20 @@ jobs:
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
+      # The private Firebase web client ID is not committed to this repository.
+      # Add a build-only placeholder when google-services.json is unavailable.
+      # This makes the CI APK compile; Google Sign-In still needs a real client ID.
+      - name: Provide CI-only Google Sign-In resource
+        run: |
+          if [ ! -f app/google-services.json ]; then
+            mkdir -p app/src/debug/res/values
+            cat > app/src/debug/res/values/google_services_ci.xml <<'EOF'
+          <resources>
+              <string name="default_web_client_id" translatable="false">ci-placeholder.apps.googleusercontent.com</string>
+          </resources>
+          EOF
+          fi
+
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v6
         with:
