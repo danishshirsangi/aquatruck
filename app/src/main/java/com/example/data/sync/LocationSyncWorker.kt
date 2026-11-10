@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import com.example.data.db.AppDatabase
 import com.example.data.firebase.FirestoreSyncManager
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 
 class LocationSyncWorker(
     appContext: Context,
@@ -24,27 +25,62 @@ class LocationSyncWorker(
         val syncManager = FirestoreSyncManager(applicationContext)
 
         return try {
-            while (true) {
-                val pending = dao.getPendingLocationPoints()
-                if (pending.isEmpty()) break
+            var completedBatches = 0
 
-                val uploaded = syncManager.syncLocationBatch(pending)
-                if (!uploaded) {
-                    dao.incrementLocationRetryCount(pending.map { it.id })
-                    return Result.retry()
+            // Bound each worker execution so a long offline backlog cannot monopolize
+            // the device. Remaining rows are retried with WorkManager backoff.
+            while (completedBatches < MAX_BATCHES_PER_RUN) {
+                var processedAny = false
+
+                val pendingLocations = dao.getPendingLocationPoints()
+                if (pendingLocations.isNotEmpty()) {
+                    val ids = pendingLocations.map { it.id }
+                    if (!syncManager.syncLocationBatch(pendingLocations)) {
+                        dao.incrementLocationRetryCount(ids)
+                        return Result.retry()
+                    }
+                    dao.markLocationPointsSynced(ids)
+                    processedAny = true
                 }
-                dao.markLocationPointsSynced(pending.map { it.id })
+
+                val pendingStops = dao.getPendingStopRecords()
+                if (pendingStops.isNotEmpty()) {
+                    val ids = pendingStops.map { it.id }
+                    if (!syncManager.syncStopBatch(pendingStops)) {
+                        dao.incrementStopRetryCount(ids)
+                        return Result.retry()
+                    }
+                    dao.markStopRecordsSynced(ids)
+                    processedAny = true
+                }
+
+                if (!processedAny) break
+                completedBatches++
             }
 
-            // Never delete unsynced points. Retain synced local history for 30 days.
+            // Never delete pending records. Synced location history is retained for 30 days.
             val retentionCutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30)
             dao.deleteSyncedLocationPointsBefore(retentionCutoff)
 
-            if (dao.getPendingLocationCount() > 0) Result.retry() else Result.success()
+            val hasPendingRecords =
+                dao.getPendingLocationCount() > 0 || dao.getPendingStopCount() > 0
+
+            if (hasPendingRecords) {
+                Log.i("LocationSyncWorker", "Sync batch limit reached; remaining records will retry.")
+                Result.retry()
+            } else {
+                Result.success()
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w("LocationSyncWorker", "Location sync failed: ${e.message}", e)
             Result.retry()
         }
+    }
+
+    companion object {
+        private const val MAX_BATCHES_PER_RUN = 5
     }
 }
 
