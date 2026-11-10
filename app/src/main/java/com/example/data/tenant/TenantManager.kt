@@ -98,12 +98,13 @@ object TenantManager {
         return try {
             val snapshot = firestore(context).collection("users").document(user.uid).get().await()
             val orgId = snapshot.getString("organizationId") ?: return false
-            val memberRole = snapshot.getString("role") ?: return false
+            val profileRole = snapshot.getString("role") ?: return false
             val name = snapshot.getString("businessName") ?: "My Business"
-            if (memberRole !in setOf("manager", "driver")) return false
             val member = firestore(context).collection("organizations").document(orgId)
                 .collection("members").document(user.uid).get().await()
             if (!member.exists() || member.getString("status") != "active") return false
+            val memberRole = member.getString("role") ?: return false
+            if (memberRole !in setOf("manager", "driver") || memberRole != profileRole) return false
             val assignedTruck = member.getLong("assignedTruckId")?.toInt()
             rememberMembership(context, orgId, memberRole, name, assignedTruckId = assignedTruck)
             if (memberRole == "manager") loadManagerPin(context, orgId, user.uid)

@@ -67,8 +67,20 @@ service cloud.firestore {
         allow get: if isMember(orgId) && (isManager(orgId) || request.auth.uid == uid);
         allow list: if isManager(orgId);
         allow create: if signedIn() && request.auth.uid == uid && (
-          getAfter(/databases/$(database)/documents/organizations/$(orgId)).data.ownerUid == uid
-          || get(/databases/$(database)/documents/driver_invitations/$(request.resource.data.invitationId)).data.organizationId == orgId
+          (
+            request.resource.data.role == "manager"
+            && request.resource.data.status == "active"
+            && getAfter(/databases/$(database)/documents/organizations/$(orgId)).data.ownerUid == uid
+          )
+          || (
+            request.resource.data.role == "driver"
+            && request.resource.data.status == "active"
+            && getAfter(/databases/$(database)/documents/driver_invitations/$(request.resource.data.invitationId)).data.organizationId == orgId
+            && getAfter(/databases/$(database)/documents/driver_invitations/$(request.resource.data.invitationId)).data.uid == uid
+            && getAfter(/databases/$(database)/documents/driver_invitations/$(request.resource.data.invitationId)).data.active == false
+            && getAfter(/databases/$(database)/documents/driver_invitations/$(request.resource.data.invitationId)).data.driverId == request.resource.data.driverId
+            && getAfter(/databases/$(database)/documents/driver_invitations/$(request.resource.data.invitationId)).data.assignedTruckId == request.resource.data.assignedTruckId
+          )
         );
         allow update, delete: if isManager(orgId);
       }
