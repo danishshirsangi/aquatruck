@@ -35,10 +35,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val fleetViewModel: com.example.ui.FleetViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
-            val isDarkTheme by fleetViewModel.isDarkTheme.collectAsState()
-            val darkTheme = isDarkTheme ?: androidx.compose.foundation.isSystemInDarkTheme()
-
-            AquaTrackTheme(darkTheme = darkTheme) {
+            AquaTrackTheme {
                 val permissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestMultiplePermissions()
                 ) { /* Permissions result handled */ }
