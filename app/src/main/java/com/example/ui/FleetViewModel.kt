@@ -253,7 +253,11 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 val previous = _assignedDriverTruckId.value
                 _assignedDriverTruckId.value = assigned
                 if (assigned != null && assigned > 0) {
-                    _selectedTruckId.value = assigned
+                    // Preserve the in-progress session tanker after a driver temporarily
+                    // switches away from their manager-default assignment.
+                    if (_loggedInTruckId.value == null) {
+                        _selectedTruckId.value = assigned
+                    }
                     sessionPrefs.edit().putInt("assigned_truck_id", assigned).apply()
                     if (previous != assigned) {
                         runCatching { TenantManager.refreshFleetCache(getApplication()) }
