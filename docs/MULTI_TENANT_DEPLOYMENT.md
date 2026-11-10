@@ -6,7 +6,7 @@
 2. Deploy `firestore.rules` to the named Firestore database configured by the app.
 3. Deploy `storage.rules` to the Firebase Storage bucket.
 4. Configure a Firestore TTL policy for the `expireAt` field on the `location_points` collection group, selecting the same named database as AquaTruck.
-5. Existing top-level fleet collections require a one-time Admin SDK migration into the first business's organization subcollections. Verify the copy before retiring the old top-level collections. Do not expose the old global collections to new businesses.
+5. The first manager registration imports the locally available pilot fleet into the new business workspace. Any legacy cloud-only records still in the old top-level collections require a one-time Admin SDK migration into the first business's organization subcollections. Verify the copy before retiring the old top-level collections. Do not expose the old global collections to new businesses.
 
 ## Firestore TTL
 
@@ -27,6 +27,6 @@ Truck subscription records are stored at `organizations/{organizationId}/truck_s
 
 ## Security and onboarding
 
-The business code is a manager-issued invitation credential. A person who has the code can join as a driver, so share it only with intended drivers. Production rollout should replace reusable business codes with single-use, revocable driver invitations and add an audited manager approval flow.
+Each registered driver has a unique, one-time invitation code linked to the business, driver's registered phone number, and assigned truck. A code is deactivated after the driver claims it. Share individual codes only with the intended driver.
 
 The manager PIN is an additional in-app access gate. Firebase Authentication and Firestore Security Rules are the actual authorization boundary.

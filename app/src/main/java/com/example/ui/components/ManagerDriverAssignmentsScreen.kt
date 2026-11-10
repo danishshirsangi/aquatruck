@@ -73,13 +73,21 @@ fun ManagerDriverAssignmentsScreen(
                     driver.invitationCode?.let { code ->
                         Text("One-time driver code: $code", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     }
+                    val assignedTruckIsActive = trucks.firstOrNull { it.id == driver.assignedTruckId }?.isShiftActive == true
                     Button(
                         onClick = { expandedDriverId = driver.id },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = trucks.isNotEmpty()
+                        enabled = trucks.isNotEmpty() && !assignedTruckIsActive
                     ) {
                         val selectedTruck = trucks.firstOrNull { it.id == driver.assignedTruckId }
                         Text(if (selectedTruck == null) "Assign a truck" else "Assigned: ${selectedTruck.name} — change")
+                    }
+                    if (assignedTruckIsActive) {
+                        Text(
+                            "Truck assignment is locked while this driver's truck has an active shift. End the shift before changing trucks.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
                     }
                     DropdownMenu(
                         expanded = expandedDriverId == driver.id,

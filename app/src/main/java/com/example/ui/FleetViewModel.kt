@@ -214,6 +214,12 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     private var simulationJob: Job? = null
 
     init {
+        // Enforce 30-day local breadcrumb retention even when the device has no network.
+        viewModelScope.launch(Dispatchers.IO) {
+            val cutoff = System.currentTimeMillis() - java.util.concurrent.TimeUnit.DAYS.toMillis(30)
+            dao.deleteLocationPointsBefore(cutoff)
+        }
+
         // Restore active driver session across app closes / process death
         val savedTruckId = sessionPrefs.getInt("session_truck_id", -1)
         val savedDriverName = sessionPrefs.getString("session_driver_name", null)
