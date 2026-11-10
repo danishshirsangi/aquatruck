@@ -207,16 +207,8 @@ fun ManagerPortalScreen(
             3 -> StopsAndTripLogsTab(
                 trucks = trucks,
                 stops = allStops,
-                voiceNotes = allVoiceNotes,
                 selectedTruckFilter = filterTruckId,
-                onFilterChanged = { filterTruckId = it },
-                onPlayVoiceNote = { viewModel.playVoiceNote(it) },
-                isPlaying = isPlaying,
-                currentlyPlayingPath = playingPath,
-                onSelectStopOnMap = { stop ->
-                    filterTruckId = stop.truckId
-                    selectedTabIndex = 1
-                }
+                onFilterChanged = { filterTruckId = it }
             )
             4 -> DriverAttendanceTab(
                 attendanceList = allAttendance,
