@@ -21,6 +21,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.BusinessOnboardingScreen
+import com.example.data.tenant.TenantManager
 import com.example.ui.screens.MainScreen
 import com.example.ui.theme.AquaTrackTheme
 import com.google.firebase.Firebase
@@ -33,10 +35,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val fleetViewModel: com.example.ui.FleetViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
-            val isDarkTheme by fleetViewModel.isDarkTheme.collectAsState()
-            val darkTheme = isDarkTheme ?: androidx.compose.foundation.isSystemInDarkTheme()
-
-            AquaTrackTheme(darkTheme = darkTheme) {
+            AquaTrackTheme {
                 val permissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestMultiplePermissions()
                 ) { /* Permissions result handled */ }
@@ -73,12 +72,35 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    var tenantReady by remember { mutableStateOf(false) }
+                    var tenantCheckComplete by remember { mutableStateOf(false) }
+
+                    LaunchedEffect(currentUser?.uid) {
+                        tenantReady = false
+                        tenantCheckComplete = currentUser == null
+                        if (currentUser != null) {
+                            tenantReady = TenantManager.restoreMembership(this@MainActivity)
+                            tenantCheckComplete = true
+                        }
+                    }
+
+                    LaunchedEffect(tenantReady) {
+                        if (tenantReady) fleetViewModel.refreshTenantContext()
+                    }
+
                     if (currentUser == null) {
                         AuthScreen(
                             onAuthSuccess = {
                                 currentUser = Firebase.auth.currentUser
                             }
                         )
+                    } else if (!tenantCheckComplete) {
+                        androidx.compose.foundation.layout.Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = androidx.compose.ui.Alignment.Center
+                        ) { androidx.compose.material3.CircularProgressIndicator() }
+                    } else if (!tenantReady) {
+                        BusinessOnboardingScreen(onComplete = { tenantReady = true })
                     } else {
                         MainScreen(viewModel = fleetViewModel)
                     }

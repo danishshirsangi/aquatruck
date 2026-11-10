@@ -48,11 +48,15 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,6 +78,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.ui.FleetViewModel
+import com.example.data.tenant.TenantManager
 import com.example.ui.components.SelfieAttendanceDialog
 import com.example.ui.theme.CyanWater
 import com.example.ui.theme.OceanNavyPrimary
@@ -84,6 +89,7 @@ import com.example.ui.theme.StatusRedAlert
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @Composable
 fun DriverPortalScreen(
@@ -99,45 +105,66 @@ fun DriverPortalScreen(
     val selectedTruck by viewModel.selectedTruck.collectAsState()
     val activeAttendance by viewModel.activeAttendance.collectAsState()
     val selectedTruckStops by viewModel.selectedTruckStops.collectAsState()
+    val shiftPolicy by viewModel.shiftPolicy.collectAsState()
+    val earlyLogoutAllowed by viewModel.earlyLogoutAllowed.collectAsState()
+    val assignedTruckId by viewModel.assignedDriverTruckId.collectAsState()
+    val isDriverAccount = TenantManager.role(context) == "driver"
+    // Drivers can choose any available tanker in their own business; identity remains fixed to their account.
+    val visibleTrucks = trucks
+    val currentUid = TenantManager.currentUserUid()
+    val visibleDrivers = if (isDriverAccount) drivers.filter { it.userUid == currentUid } else drivers
 
     // Driver identity selection state
     var selectedDriverName by remember { mutableStateOf<String?>(null) }
     var customDriverInput by remember { mutableStateOf("") }
     var isEnteringCustomDriver by remember { mutableStateOf(false) }
 
-    val currentTruck = selectedTruck ?: trucks.firstOrNull()
+    val currentTruck = selectedTruck?.takeIf { candidate -> visibleTrucks.any { it.id == candidate.id } } ?: visibleTrucks.firstOrNull()
     val effectiveTruck = if (loggedInTruckId != null) {
-        trucks.firstOrNull { it.id == loggedInTruckId } ?: currentTruck
+        visibleTrucks.firstOrNull { it.id == loggedInTruckId } ?: currentTruck
     } else {
         currentTruck
     }
 
-    val effectiveDriverName = loggedInDriverName
-        ?: selectedDriverName
-        ?: (if (customDriverInput.isNotBlank()) customDriverInput.trim() else null)
-        ?: drivers.firstOrNull()?.name
-        ?: effectiveTruck?.driverName
-        ?: "Driver"
+    val effectiveDriverName = if (isDriverAccount) {
+        visibleDrivers.firstOrNull()?.name ?: loggedInDriverName ?: "Driver"
+    } else {
+        loggedInDriverName
+            ?: selectedDriverName
+            ?: (if (customDriverInput.isNotBlank()) customDriverInput.trim() else null)
+            ?: visibleDrivers.firstOrNull()?.name
+            ?: effectiveTruck?.driverName
+            ?: "Driver"
+    }
 
     // Session lock & shift active status: persists across app closes
     val isShiftActive = (loggedInTruckId != null && effectiveTruck?.isShiftActive == true)
 
-    // 9:00 PM (21:00) Logout Gate Check
-    val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-    val isAfter9Pm = currentHour >= 21
-
-    var showEarlyLogoutDialog by remember { mutableStateOf(false) }
-    var earlyLogoutPinInput by remember { mutableStateOf("") }
-    var earlyLogoutPinError by remember { mutableStateOf(false) }
+    // The button gate refreshes independently from GPS callbacks; time unlock never ends the shift.
+    var clockNowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            clockNowMillis = System.currentTimeMillis()
+            delay(15_000L)
+        }
+    }
+    val currentCalendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone(shiftPolicy.timezone)).apply {
+        timeInMillis = clockNowMillis
+    }
+    val currentMinutes = currentCalendar.get(java.util.Calendar.HOUR_OF_DAY) * 60 +
+        currentCalendar.get(java.util.Calendar.MINUTE)
+    val isLogoutAllowed = earlyLogoutAllowed || currentMinutes >= shiftPolicy.logoutTimeMinutes
 
     // Voice recording & playback state
     val isRecording by viewModel.audioRecorder.isRecording.collectAsState()
+    val voiceUploadStatus by viewModel.voiceUploadStatus.collectAsState()
     val recordDurationSec by viewModel.audioRecorder.recordingDurationSec.collectAsState()
     val voiceNotes by viewModel.selectedTruckVoiceNotes.collectAsState()
     val playingPath by viewModel.audioPlayer.currentlyPlayingPath.collectAsState()
     val isPlaying by viewModel.audioPlayer.isPlaying.collectAsState()
 
     var showSelfieDialog by remember { mutableStateOf(false) }
+    var switchTruckMenuExpanded by remember { mutableStateOf(false) }
 
     // Pulse animation for recording mic
     val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
@@ -159,7 +186,7 @@ fun DriverPortalScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Zero Trucks Fallback
-        if (trucks.isEmpty()) {
+        if (visibleTrucks.isEmpty()) {
             item {
                 Spacer(modifier = Modifier.height(30.dp))
                 Card(
@@ -190,7 +217,7 @@ fun DriverPortalScreen(
                             color = OceanNavyPrimary
                         )
                         Text(
-                            text = "Please ask the Manager to add your water tanker truck in the Manager Portal (PIN: 1234).",
+                            text = "Please ask your fleet manager to register your driver profile and assign a truck before starting a shift.",
                             textAlign = TextAlign.Center,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -205,6 +232,26 @@ fun DriverPortalScreen(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // A driver account is bound to the identity claimed through its one-time invitation.
+                    if (isDriverAccount) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = StatusActiveGreen, modifier = Modifier.size(26.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text("SIGNED IN DRIVER", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(effectiveDriverName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    Text("Your identity is linked to your invitation and cannot be changed here.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    } else {
                     // 1. SELECT WHO YOU ARE
                     Column {
                         Row(
@@ -236,7 +283,7 @@ fun DriverPortalScreen(
 
                         if (drivers.isNotEmpty()) {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                items(drivers) { driver ->
+                                items(visibleDrivers) { driver ->
                                     val isSelected = (selectedDriverName == driver.name) ||
                                             (selectedDriverName == null && !isEnteringCustomDriver && drivers.firstOrNull()?.name == driver.name)
 
@@ -322,6 +369,8 @@ fun DriverPortalScreen(
                         }
                     }
 
+                    }
+
                     // 2. WHICH TRUCK ARE YOU GONNA DRIVE?
                     Column {
                         Row(
@@ -350,12 +399,12 @@ fun DriverPortalScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            items(trucks) { truck ->
+                            items(visibleTrucks) { truck ->
                                 val isSelected = truck.id == selectedTruckId
                                 Card(
                                     modifier = Modifier
                                         .width(155.dp)
-                                        .clickable { viewModel.selectTruck(truck.id) }
+                                        .clickable(enabled = !truck.isShiftActive) { viewModel.selectTruck(truck.id) }
                                         .testTag("select_truck_${truck.id}"),
                                     shape = RoundedCornerShape(18.dp),
                                     colors = CardDefaults.cardColors(
@@ -480,10 +529,20 @@ fun DriverPortalScreen(
                                     }
                                 }
 
+                                if (truck.isShiftActive) {
+                                    Text(
+                                        "This truck already has an active shift. Ask your manager to assign an available truck.",
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+
                                 Spacer(modifier = Modifier.height(14.dp))
 
                                 Button(
                                     onClick = { showSelfieDialog = true },
+                                    enabled = !truck.isShiftActive,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(58.dp)
@@ -548,12 +607,44 @@ fun DriverPortalScreen(
                                     color = CyanWater.copy(alpha = 0.2f)
                                 ) {
                                     Text(
-                                        text = "LOCKED",
+                                        text = "SHIFT ACTIVE",
                                         color = CyanWater,
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 11.sp,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
+                                }
+                            }
+                        }
+
+                        if (isDriverAccount) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                                    Text("Switch tanker", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Text("Your current shift will be closed on this tanker and a new attendance and GPS tracking session will start on the selected available tanker.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Box {
+                                        Button(onClick = { switchTruckMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                                            Text("Change tanker")
+                                        }
+                                        DropdownMenu(
+                                            expanded = switchTruckMenuExpanded,
+                                            onDismissRequest = { switchTruckMenuExpanded = false }
+                                        ) {
+                                            trucks.filter { it.id != truck.id && !it.isShiftActive }.forEach { candidate ->
+                                                DropdownMenuItem(
+                                                    text = { Text("${candidate.name} (${candidate.plateNumber})") },
+                                                    onClick = {
+                                                        switchTruckMenuExpanded = false
+                                                        viewModel.switchDriverTruck(candidate.id, context)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -683,6 +774,20 @@ fun DriverPortalScreen(
                                             )
                                         }
                                     }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                if (voiceUploadStatus != "Idle") {
+                                    Text(
+                                        text = voiceUploadStatus,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = when {
+                                            voiceUploadStatus.startsWith("Uploaded") -> StatusActiveGreen
+                                            voiceUploadStatus.startsWith("Upload pending") -> StatusAmberWarning
+                                            else -> CyanWater
+                                        },
+                                        textAlign = TextAlign.Center
+                                    )
                                 }
 
                                 Spacer(modifier = Modifier.height(16.dp))
@@ -841,8 +946,8 @@ fun DriverPortalScreen(
                             }
                         }
 
-                        // ================= SHIFT END / LOG OUT (9:00 PM LOCK) =================
-                        if (isAfter9Pm) {
+                        // ================= SHIFT END / LOG OUT =================
+                        if (isLogoutAllowed) {
                             // After 9:00 PM: Driver is allowed to log out directly
                             Button(
                                 onClick = { viewModel.endDriverShift(truck.id, context) },
@@ -896,7 +1001,7 @@ fun DriverPortalScreen(
                                     Spacer(modifier = Modifier.height(10.dp))
 
                                     Text(
-                                        text = "SHIFT LOCKED UNTIL 9:00 PM",
+                                        text = "SHIFT LOCKED UNTIL ${shiftPolicy.formattedLogoutTime()}",
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 15.sp,
                                         color = OceanNavyPrimary
@@ -905,35 +1010,18 @@ fun DriverPortalScreen(
                                     Spacer(modifier = Modifier.height(4.dp))
 
                                     Text(
-                                        text = "Driver logout is locked until 9:00 PM (21:00). To log out before 9:00 PM, Manager PIN authorization is required.",
+                                        text = "Logout becomes available at ${shiftPolicy.formattedLogoutTime()}. Your shift and GPS tracking will continue until you manually log out. Ask your manager to enable early logout if needed.",
                                         textAlign = TextAlign.Center,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
 
-                                    Spacer(modifier = Modifier.height(14.dp))
-
-                                    Button(
-                                        onClick = {
-                                            earlyLogoutPinInput = ""
-                                            earlyLogoutPinError = false
-                                            showEarlyLogoutDialog = true
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(50.dp)
-                                            .testTag("manager_early_logout_button"),
-                                        colors = ButtonDefaults.buttonColors(containerColor = OceanNavyPrimary),
-                                        shape = RoundedCornerShape(14.dp)
-                                    ) {
-                                        Icon(Icons.Default.VerifiedUser, contentDescription = null, modifier = Modifier.size(20.dp), tint = CyanWater)
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "EARLY LOGOUT (MANAGER PIN REQUIRED)",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp
-                                        )
-                                    }
+                                    Text(
+                                        text = "Early logout is controlled by your fleet manager.",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        textAlign = TextAlign.Center
+                                    )
                                 }
                             }
                         }
@@ -942,81 +1030,6 @@ fun DriverPortalScreen(
                 }
             }
         }
-    }
-
-    // Manager Early Logout PIN Dialog (Before 9:00 PM)
-    if (showEarlyLogoutDialog && effectiveTruck != null) {
-        AlertDialog(
-            onDismissRequest = { showEarlyLogoutDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Lock, contentDescription = null, tint = OceanNavyPrimary, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Manager Early Logout",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 18.sp,
-                        color = OceanNavyPrimary
-                    )
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Driver shift is locked until 9:00 PM. Please enter the Manager PIN (1234) to authorize ending this shift early:",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = earlyLogoutPinInput,
-                        onValueChange = {
-                            earlyLogoutPinInput = it
-                            earlyLogoutPinError = false
-                        },
-                        label = { Text("Manager PIN") },
-                        placeholder = { Text("1234") },
-                        singleLine = true,
-                        isError = earlyLogoutPinError,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("early_logout_pin_input"),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    if (earlyLogoutPinError) {
-                        Text(
-                            text = "Incorrect Manager PIN. Please try again.",
-                            color = StatusRedAlert,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (viewModel.verifyManagerPin(earlyLogoutPinInput)) {
-                            viewModel.endDriverShift(effectiveTruck.id, context)
-                            showEarlyLogoutDialog = false
-                        } else {
-                            earlyLogoutPinError = true
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = StatusRedAlert),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.testTag("confirm_early_logout_button")
-                ) {
-                    Text("Authorize & End Shift", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEarlyLogoutDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
     }
 
     // Selfie Attendance Dialog

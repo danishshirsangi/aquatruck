@@ -128,7 +128,7 @@ fun ManagerPinDialog(
                         if (isError) {
                             Text("Incorrect PIN. Please try again.", color = StatusRedAlert)
                         } else {
-                            Text("Default PIN: 1234", fontSize = 11.sp)
+                            Text("Enter the PIN created for your business.", fontSize = 11.sp)
                         }
                     },
                     modifier = Modifier

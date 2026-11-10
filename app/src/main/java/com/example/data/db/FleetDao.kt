@@ -101,8 +101,8 @@ interface FleetDao {
     @Query("SELECT COUNT(*) FROM location_points WHERE isSynced = 0")
     suspend fun getPendingLocationCount(): Int
 
-    @Query("DELETE FROM location_points WHERE isSynced = 1 AND timestamp < :cutoffTimestamp")
-    suspend fun deleteSyncedLocationPointsBefore(cutoffTimestamp: Long): Int
+    @Query("DELETE FROM location_points WHERE timestamp < :cutoffTimestamp")
+    suspend fun deleteLocationPointsBefore(cutoffTimestamp: Long): Int
 
     // Pending stop records are retained locally until Firestore confirms the batch commit.
     @Query("SELECT * FROM stop_records WHERE isSynced = 0 ORDER BY startTime ASC LIMIT 200")
@@ -145,6 +145,18 @@ interface FleetDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertVoiceNote(note: VoiceDeliveryNote): Long
+
+    @Query("SELECT * FROM voice_delivery_notes WHERE isSynced = 0 ORDER BY timestamp ASC LIMIT 25")
+    suspend fun getPendingVoiceNotes(): List<VoiceDeliveryNote>
+
+    @Query("UPDATE voice_delivery_notes SET isSynced = 1, retryCount = 0 WHERE id IN (:ids)")
+    suspend fun markVoiceNotesSynced(ids: List<Long>)
+
+    @Query("UPDATE voice_delivery_notes SET retryCount = retryCount + 1 WHERE id IN (:ids)")
+    suspend fun incrementVoiceNoteRetryCount(ids: List<Long>)
+
+    @Query("SELECT COUNT(*) FROM voice_delivery_notes WHERE isSynced = 0")
+    suspend fun getPendingVoiceNoteCount(): Int
 
     @Query("DELETE FROM voice_delivery_notes WHERE id = :id")
     suspend fun deleteVoiceNote(id: Long)

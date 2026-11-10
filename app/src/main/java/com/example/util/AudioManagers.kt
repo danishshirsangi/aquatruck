@@ -192,28 +192,49 @@ class AudioPlayerManager {
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
     fun togglePlay(filePath: String, onFinished: (() -> Unit)? = null) {
-        if (_currentlyPlayingPath.value == filePath && _isPlaying.value) {
+        if (_currentlyPlayingPath.value == filePath) {
             stop()
             return
         }
 
         stop()
 
+        val player = MediaPlayer()
+        mediaPlayer = player
+        _currentlyPlayingPath.value = filePath
+        _isPlaying.value = true
+
         try {
-            val player = MediaPlayer()
-            player.setDataSource(filePath)
-            player.prepare()
-            player.setOnCompletionListener {
-                _isPlaying.value = false
-                _currentlyPlayingPath.value = null
-                onFinished?.invoke()
+            player.setOnPreparedListener { preparedPlayer ->
+                if (mediaPlayer === preparedPlayer) {
+                    preparedPlayer.start()
+                }
             }
-            player.start()
-            mediaPlayer = player
-            _currentlyPlayingPath.value = filePath
-            _isPlaying.value = true
+            player.setOnCompletionListener {
+                if (mediaPlayer === it) {
+                    _isPlaying.value = false
+                    _currentlyPlayingPath.value = null
+                    mediaPlayer?.release()
+                    mediaPlayer = null
+                    onFinished?.invoke()
+                }
+            }
+            player.setOnErrorListener { failedPlayer, what, extra ->
+                Log.e("AudioPlayerManager", "Playback error what=$what extra=$extra for $filePath")
+                if (mediaPlayer === failedPlayer) {
+                    runCatching { failedPlayer.release() }
+                    mediaPlayer = null
+                    _isPlaying.value = false
+                    _currentlyPlayingPath.value = null
+                }
+                true
+            }
+            player.setDataSource(filePath)
+            player.prepareAsync()
         } catch (e: Exception) {
             Log.e("AudioPlayerManager", "Failed to play audio: $filePath", e)
+            runCatching { player.release() }
+            if (mediaPlayer === player) mediaPlayer = null
             _isPlaying.value = false
             _currentlyPlayingPath.value = null
         }

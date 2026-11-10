@@ -25,8 +25,11 @@ data class DriverEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val phone: String = "",
-    val assignedTruckId: Int = 1,
-    val createdAt: Long = System.currentTimeMillis()
+    val assignedTruckId: Int = 0,
+    val createdAt: Long = System.currentTimeMillis(),
+    val userUid: String? = null,
+    val earlyLogoutEnabled: Boolean = false,
+    val invitationCode: String? = null
 )
 
 @Entity(tableName = "attendance")
@@ -94,7 +97,9 @@ data class VoiceDeliveryNote(
     val latitude: Double,
     val longitude: Double,
     val locationLabel: String = "Water Delivery Site",
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val retryCount: Int = 0
 )
 
 @Entity(tableName = "delivery_proofs")

@@ -12,6 +12,11 @@ import com.example.data.model.VoiceDeliveryNote
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.CollectionReference
+import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
+import java.io.File
+import android.net.Uri
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
 
@@ -23,6 +28,39 @@ class FirestoreSyncManager(private val context: Context) {
     }
 
     private val auth get() = Firebase.auth
+
+    private fun collection(name: String): CollectionReference {
+        val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+            .getString("organization_id", null)
+        check(!orgId.isNullOrBlank()) { "No business membership is configured; refusing to write to global fleet collections." }
+        return firestore.collection("organizations").document(orgId).collection(name)
+    }
+
+    suspend fun recordTestTruckSubscription(truckId: Int): Boolean {
+        val user = auth.currentUser ?: return false
+        val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+            .getString("organization_id", null) ?: return false
+        return try {
+            val now = System.currentTimeMillis()
+            firestore.collection("organizations").document(orgId)
+                .collection("truck_subscriptions").document(truckId.toString())
+                .set(hashMapOf(
+                    "truckId" to truckId,
+                    "amountPaise" to 9900,
+                    "currency" to "INR",
+                    "billingPeriod" to "monthly",
+                    "mode" to "test",
+                    "status" to "test_active",
+                    "startedAt" to now,
+                    "renewsAt" to now + 30L * 24L * 60L * 60L * 1000L,
+                    "createdBy" to user.uid
+                )).await()
+            true
+        } catch (e: Exception) {
+            Log.w("FirestoreSync", "Unable to save test truck subscription: ${e.message}", e)
+            false
+        }
+    }
 
     suspend fun syncTruck(truck: TruckEntity) {
         if (auth.currentUser == null) return
@@ -41,7 +79,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "statusText" to truck.statusText,
                 "lastUpdated" to truck.lastUpdated
             )
-            firestore.collection("trucks").document("truck_${truck.id}")
+            collection("trucks").document("truck_${truck.id}")
                 .set(data, SetOptions.merge())
                 .await()
         } catch (e: Exception) {
@@ -52,7 +90,7 @@ class FirestoreSyncManager(private val context: Context) {
     suspend fun deleteTruck(truckId: Int) {
         if (auth.currentUser == null) return
         try {
-            firestore.collection("trucks").document("truck_$truckId").delete().await()
+            collection("trucks").document("truck_$truckId").delete().await()
         } catch (e: Exception) {
             Log.w("FirestoreSync", "Error deleting truck: ${e.message}")
         }
@@ -66,23 +104,62 @@ class FirestoreSyncManager(private val context: Context) {
                 "name" to driver.name,
                 "phone" to driver.phone,
                 "assignedTruckId" to driver.assignedTruckId,
-                "createdAt" to driver.createdAt
+                "createdAt" to driver.createdAt,
+                "uid" to (driver.userUid ?: ""),
+                "earlyLogoutEnabled" to driver.earlyLogoutEnabled,
+                "invitationCode" to (driver.invitationCode ?: "")
             )
-            firestore.collection("drivers").document("driver_${driver.id}")
+            collection("drivers").document("driver_${driver.id}")
                 .set(data, SetOptions.merge())
                 .await()
+            val normalizedPhone = driver.phone.filter { it.isDigit() }
+            val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+                .getString("organization_id", null)
+            val inviteCode = driver.invitationCode
+            if (normalizedPhone.length >= 8 && !orgId.isNullOrBlank() && !inviteCode.isNullOrBlank()) {
+                val phoneHash = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(normalizedPhone.toByteArray(Charsets.UTF_8))
+                    .joinToString("") { "%02x".format(it) }
+                val businessName = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+                    .getString("business_name", "Business") ?: "Business"
+                firestore.collection("driver_invitations").document(inviteCode).set(mapOf(
+                    "organizationId" to orgId,
+                    "businessName" to businessName,
+                    "driverId" to driver.id,
+                    "driverName" to driver.name,
+                    "phoneHash" to phoneHash,
+                    "assignedTruckId" to driver.assignedTruckId,
+                    "active" to driver.userUid.isNullOrBlank(),
+                    "uid" to (driver.userUid ?: ""),
+                    "createdAt" to driver.createdAt
+                ), SetOptions.merge()).await()
+            }
         } catch (e: Exception) {
             Log.w("FirestoreSync", "Error syncing driver: ${e.message}")
         }
     }
 
-    suspend fun deleteDriver(driverId: Long) {
-        if (auth.currentUser == null) return
-        try {
-            firestore.collection("drivers").document("driver_$driverId").delete().await()
+    suspend fun deleteDriver(driver: DriverEntity): Boolean {
+        if (auth.currentUser == null) return false
+        return try {
+            val batch = firestore.batch()
+            batch.delete(collection("drivers").document("driver_${driver.id}"))
+            driver.invitationCode?.takeIf { it.isNotBlank() }?.let { code ->
+                batch.delete(firestore.collection("driver_invitations").document(code))
+            }
+            driver.userUid?.takeIf { it.isNotBlank() }?.let { uid ->
+                batch.delete(collection("members").document(uid))
+            }
+            batch.commit().await()
+            true
         } catch (e: Exception) {
-            Log.w("FirestoreSync", "Error deleting driver: ${e.message}")
+            Log.w("FirestoreSync", "Error deleting driver: ${e.message}", e)
+            false
         }
+    }
+
+    suspend fun updateDriver(driver: DriverEntity) {
+        syncDriver(driver)
     }
 
     suspend fun syncAttendance(record: AttendanceRecord) {
@@ -99,7 +176,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "checkInLng" to record.checkInLng,
                 "isCompleted" to record.isCompleted
             )
-            firestore.collection("attendance").document("att_${record.id}")
+            collection("attendance").document("att_${record.truckId}_${record.checkInTime}")
                 .set(data, SetOptions.merge())
                 .await()
         } catch (e: Exception) {
@@ -107,25 +184,37 @@ class FirestoreSyncManager(private val context: Context) {
         }
     }
 
-    suspend fun syncVoiceNote(note: VoiceDeliveryNote) {
-        if (auth.currentUser == null) return
-        try {
+    suspend fun syncVoiceNote(note: VoiceDeliveryNote): Boolean {
+        if (auth.currentUser == null) return false
+        return try {
+            val localFile = File(note.audioFilePath)
+            val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+                .getString("organization_id", null)
+            if (!localFile.exists() || orgId.isNullOrBlank()) return false
+            val audioReference = SupabaseAudioStorage.upload(
+                context = context,
+                localPath = note.audioFilePath,
+                truckId = note.truckId,
+                timestamp = note.timestamp
+            )
             val data = hashMapOf(
                 "id" to note.id,
                 "truckId" to note.truckId,
                 "driverName" to note.driverName,
-                "audioFilePath" to note.audioFilePath,
+                "audioFilePath" to audioReference,
                 "durationSeconds" to note.durationSeconds,
                 "latitude" to note.latitude,
                 "longitude" to note.longitude,
                 "locationLabel" to note.locationLabel,
                 "timestamp" to note.timestamp
             )
-            firestore.collection("voice_delivery_notes").document("voice_${note.id}")
+            collection("voice_delivery_notes").document("voice_${note.truckId}_${note.timestamp}")
                 .set(data, SetOptions.merge())
                 .await()
+            true
         } catch (e: Exception) {
-            Log.w("FirestoreSync", "Error syncing voice note: ${e.message}")
+            Log.w("FirestoreSync", "Error syncing voice note to Supabase: ${e.message}", e)
+            false
         }
     }
 
@@ -139,9 +228,10 @@ class FirestoreSyncManager(private val context: Context) {
                 "longitude" to point.longitude,
                 "speedKmh" to point.speedKmh,
                 "accuracyMeters" to point.accuracyMeters,
-                "timestamp" to point.timestamp
+                "timestamp" to point.timestamp,
+                "expireAt" to java.util.Date(point.timestamp + 30L * 24L * 60L * 60L * 1000L)
             )
-            firestore.collection("location_points").document("loc_${point.truckId}_${point.timestamp}")
+            collection("location_points").document("loc_${point.truckId}_${point.timestamp}")
                 .set(data, SetOptions.merge())
                 .await()
         } catch (e: Exception) {
@@ -167,10 +257,11 @@ class FirestoreSyncManager(private val context: Context) {
                         "longitude" to point.longitude,
                         "speedKmh" to point.speedKmh,
                         "accuracyMeters" to point.accuracyMeters,
-                        "timestamp" to point.timestamp
+                        "timestamp" to point.timestamp,
+                        "expireAt" to java.util.Date(point.timestamp + 30L * 24L * 60L * 60L * 1000L)
                     )
                     batch.set(
-                        firestore.collection("location_points")
+                        collection("location_points")
                             .document("loc_${point.truckId}_${point.timestamp}"),
                         data,
                         SetOptions.merge()
@@ -199,7 +290,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "addressOrLabel" to stop.addressOrLabel,
                 "category" to stop.category
             )
-            firestore.collection("stop_records").document("stop_${stop.id}")
+            collection("stop_records").document("stop_${stop.truckId}_${stop.startTime}")
                 .set(data, SetOptions.merge())
                 .await()
             true
@@ -232,7 +323,7 @@ class FirestoreSyncManager(private val context: Context) {
                         "category" to stop.category
                     )
                     batch.set(
-                        firestore.collection("stop_records").document("stop_${stop.id}"),
+                        collection("stop_records").document("stop_${stop.truckId}_${stop.startTime}"),
                         data,
                         SetOptions.merge()
                     )
@@ -259,7 +350,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "delivery_proofs"
             )
             for (colName in collections) {
-                val snapshot = firestore.collection(colName).get().await()
+                val snapshot = collection(colName).get().await()
                 for (doc in snapshot.documents) {
                     doc.reference.delete().await()
                 }

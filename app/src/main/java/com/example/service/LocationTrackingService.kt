@@ -43,9 +43,12 @@ import kotlin.math.sqrt
 
 class LocationTrackingService : Service() {
 
-    // A single consumer serializes GPS samples and avoids one coroutine per callback.
+    private data class TrackingSample(val truckId: Int, val location: Location)
+
+    // A single consumer serializes GPS samples and keeps each sample attached to the
+    // tanker that was active when Android delivered that GPS callback.
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val locationChannel = Channel<Location>(Channel.UNLIMITED)
+    private val locationChannel = Channel<TrackingSample>(Channel.UNLIMITED)
     private var locationProcessorJob: Job? = null
     private var liveTruckSyncJob: Job? = null
 
@@ -68,7 +71,9 @@ class LocationTrackingService : Service() {
     private var anchorLat: Double = 0.0
     private var anchorLng: Double = 0.0
     private var anchorStartTime: Long = 0L
+    private var anchorTruckId: Int? = null
     private var hasLoggedCurrentDropPoint: Boolean = false
+    private var outsideAnchorSamples: Int = 0
 
     private val sessionPrefs by lazy {
         getSharedPreferences(SESSION_PREFS, Context.MODE_PRIVATE)
@@ -86,6 +91,11 @@ class LocationTrackingService : Service() {
         private const val SESSION_PREFS = "aquatrack_tracking_service"
         private const val PREF_TRUCK_ID = "active_truck_id"
         private const val PREF_TRUCK_NAME = "active_truck_name"
+        private const val PREF_STOP_TRUCK_ID = "stop_truck_id"
+        private const val PREF_STOP_ANCHOR_LAT = "stop_anchor_lat"
+        private const val PREF_STOP_ANCHOR_LNG = "stop_anchor_lng"
+        private const val PREF_STOP_START_TIME = "stop_start_time"
+        private const val PREF_STOP_RECORDED = "stop_recorded"
 
         const val ACTION_START_TRACKING = "com.example.aquatrack.START_TRACKING"
         const val ACTION_STOP_TRACKING = "com.example.aquatrack.STOP_TRACKING"
@@ -123,7 +133,7 @@ class LocationTrackingService : Service() {
                 // Sort a delivered batch before enqueueing it, preserving chronological order.
                 result.locations.sortedBy { it.time }.forEach { location ->
                     if (location.latitude != 0.0 || location.longitude != 0.0) {
-                        val queued = locationChannel.trySend(Location(location))
+                        val queued = locationChannel.trySend(TrackingSample(activeTruckId, Location(location)))
                         if (queued.isFailure) {
                             Log.w("LocationTrackingService", "Location queue is closed; sample was not queued.")
                         }
@@ -133,10 +143,10 @@ class LocationTrackingService : Service() {
         }
 
         locationProcessorJob = serviceScope.launch {
-            for (location in locationChannel) {
+            for (sample in locationChannel) {
                 try {
-                    updateTrackingMode(location)
-                    handleNewLocation(location)
+                    updateTrackingMode(sample.location)
+                    handleNewLocation(sample.location, sample.truckId)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -230,6 +240,20 @@ class LocationTrackingService : Service() {
         currentIntervalMillis = 0L
         currentPriority = -1
         lastNotificationStatus = null
+        val savedStopTruckId = sessionPrefs.getInt(PREF_STOP_TRUCK_ID, -1)
+        if (savedStopTruckId == activeTruckId) {
+            anchorLat = sessionPrefs.getString(PREF_STOP_ANCHOR_LAT, "0.0")?.toDoubleOrNull() ?: 0.0
+            anchorLng = sessionPrefs.getString(PREF_STOP_ANCHOR_LNG, "0.0")?.toDoubleOrNull() ?: 0.0
+            anchorStartTime = sessionPrefs.getLong(PREF_STOP_START_TIME, 0L)
+            hasLoggedCurrentDropPoint = sessionPrefs.getBoolean(PREF_STOP_RECORDED, false)
+        } else {
+            anchorLat = 0.0
+            anchorLng = 0.0
+            anchorStartTime = 0L
+            hasLoggedCurrentDropPoint = false
+        }
+        anchorTruckId = activeTruckId
+        outsideAnchorSamples = 0
         isTracking = true
 
         requestLocationUpdates(MOVING_INTERVAL_MS, Priority.PRIORITY_HIGH_ACCURACY)
@@ -245,7 +269,7 @@ class LocationTrackingService : Service() {
             fusedLocationClient.removeLocationUpdates(callback)
             val request = LocationRequest.Builder(priority, intervalMillis)
                 .setMinUpdateIntervalMillis(intervalMillis)
-                .setMinUpdateDistanceMeters(if (intervalMillis == MOVING_INTERVAL_MS) 10f else 0f)
+                .setMinUpdateDistanceMeters(if (intervalMillis == MOVING_INTERVAL_MS) 10f else 15f)
                 .build()
 
             fusedLocationClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
@@ -274,8 +298,8 @@ class LocationTrackingService : Service() {
         } else {
             stationarySamples++
             if (stationarySamples >= STATIONARY_SAMPLES_REQUIRED) {
-                // Balanced power while stationary reduces GPS power demand. The three-minute
-                // interval is retained so the existing stationary sampling policy is unchanged.
+                // Balanced power plus a modest stationary distance threshold reduces unnecessary
+                // callbacks. The three-minute interval remains unchanged.
                 requestLocationUpdates(
                     STATIONARY_INTERVAL_MS,
                     Priority.PRIORITY_BALANCED_POWER_ACCURACY
@@ -285,13 +309,29 @@ class LocationTrackingService : Service() {
         previousLocation = Location(location)
     }
 
-    private suspend fun handleNewLocation(location: Location, customStatus: String? = null) {
-        val truckId = activeTruckId
+    private suspend fun handleNewLocation(
+        location: Location,
+        sampleTruckId: Int,
+        customStatus: String? = null
+    ) {
+        val truckId = sampleTruckId
         val lat = location.latitude
         val lng = location.longitude
         val speedKmh = location.speed * 3.6f
         val now = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
         val dao = AppDatabase.getDatabase(applicationContext).fleetDao()
+
+        // Keep automatic stop detection isolated by tanker, even when callbacks
+        // already queued for the previous tanker are drained after a switch.
+        if (anchorTruckId != truckId) {
+            anchorTruckId = truckId
+            anchorLat = 0.0
+            anchorLng = 0.0
+            anchorStartTime = 0L
+            hasLoggedCurrentDropPoint = false
+            outsideAnchorSamples = 0
+            persistStopDetectionState(truckId)
+        }
 
         // Local persistence always completes before any network scheduling or upload.
         dao.insertLocationPoint(
@@ -311,13 +351,17 @@ class LocationTrackingService : Service() {
             anchorLng = lng
             anchorStartTime = now
             hasLoggedCurrentDropPoint = false
+            outsideAnchorSamples = 0
+            persistStopDetectionState(truckId)
         }
 
         val distFromAnchor = calculateDistanceMeters(anchorLat, anchorLng, lat, lng)
         if (distFromAnchor <= 100.0) {
+            outsideAnchorSamples = 0
             val durationAtAnchor = now - anchorStartTime
             if (durationAtAnchor >= 120_000L && !hasLoggedCurrentDropPoint) {
                 hasLoggedCurrentDropPoint = true
+                persistStopDetectionState(truckId)
                 val durationMin = (durationAtAnchor / 60_000L).toInt().coerceAtLeast(2)
                 val label = LocationUtils.getAddressLabel(applicationContext, lat, lng)
                 val dropPoint = StopRecord(
@@ -334,10 +378,15 @@ class LocationTrackingService : Service() {
                 LocationSyncScheduler.enqueue(applicationContext)
             }
         } else {
-            anchorLat = lat
-            anchorLng = lng
-            anchorStartTime = now
-            hasLoggedCurrentDropPoint = false
+            outsideAnchorSamples++
+            if (outsideAnchorSamples >= 2) {
+                anchorLat = lat
+                anchorLng = lng
+                anchorStartTime = now
+                hasLoggedCurrentDropPoint = false
+                outsideAnchorSamples = 0
+                persistStopDetectionState(truckId)
+            }
         }
 
         val status = customStatus ?: if (speedKmh > STATIONARY_SPEED_KMH)
@@ -371,6 +420,16 @@ class LocationTrackingService : Service() {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(NOTIFICATION_ID, notification)
         }
+    }
+
+    private fun persistStopDetectionState(truckId: Int) {
+        sessionPrefs.edit()
+            .putInt(PREF_STOP_TRUCK_ID, truckId)
+            .putString(PREF_STOP_ANCHOR_LAT, anchorLat.toString())
+            .putString(PREF_STOP_ANCHOR_LNG, anchorLng.toString())
+            .putLong(PREF_STOP_START_TIME, anchorStartTime)
+            .putBoolean(PREF_STOP_RECORDED, hasLoggedCurrentDropPoint)
+            .apply()
     }
 
     private fun stopLocationUpdates() {

@@ -40,6 +40,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,6 +65,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -79,6 +82,8 @@ import com.example.ui.FleetViewModel
 import com.example.ui.components.AddDriverDialog
 import com.example.ui.components.AddTruckDialog
 import com.example.ui.components.InteractiveFleetMap
+import com.example.ui.components.ManagerShiftSettingsScreen
+import com.example.ui.components.ManagerDriverAssignmentsScreen
 import com.example.ui.theme.CyanWater
 import com.example.ui.theme.OceanNavyPrimary
 import com.example.ui.theme.StatusActiveGreen
@@ -95,6 +100,7 @@ fun ManagerPortalScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val trucks by viewModel.allTrucks.collectAsState()
     val drivers by viewModel.allDrivers.collectAsState()
     val allStops by viewModel.allStops.collectAsState()
@@ -119,8 +125,14 @@ fun ManagerPortalScreen(
     var showAddTruckDialog by remember { mutableStateOf(false) }
     var showAddDriverDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
+    var driverPendingDeletion by remember { mutableStateOf<DriverEntity?>(null) }
+    var showTestPaymentDialog by remember { mutableStateOf(false) }
+    var pendingTruckName by remember { mutableStateOf("") }
+    var pendingTruckPlate by remember { mutableStateOf("") }
+    var pendingTruckDriver by remember { mutableStateOf("") }
+    var pendingTruckCapacity by remember { mutableIntStateOf(10000) }
 
-    val tabs = listOf("Fleet Overview", "Interactive Map", "Voice Deliveries", "Stop Logs", "Attendance")
+    val tabs = listOf("Fleet Overview", "Interactive Map", "Voice Deliveries", "Stop Logs", "Attendance", "Shift Settings", "Drivers & Assignments")
 
     Column(
         modifier = modifier
@@ -171,11 +183,12 @@ fun ManagerPortalScreen(
                     selectedTabIndex = 1
                 },
                 onDeleteTruck = { viewModel.deleteTruck(it) },
+                onDeleteDriver = { driverPendingDeletion = it },
                 onEndShift = { viewModel.managerEndTruckShift(it, context) },
                 onResetAllClicked = { showResetConfirmDialog = true }
             )
             1 -> {
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     InteractiveFleetMap(
                         trucks = trucks,
                         selectedTruckId = filterTruckId,
@@ -187,7 +200,7 @@ fun ManagerPortalScreen(
                         selectedHistoryDays = historyDays,
                         onHistoryDaysChanged = { viewModel.setHistoryDays(it) },
                         onTruckSelected = { id ->
-                            filterTruckId = if (filterTruckId == id) null else id
+                            filterTruckId = if (id == null) null else if (filterTruckId == id) null else id
                         },
                         onPlayVoiceNote = { viewModel.playVoiceNote(it) },
                         isPlaying = isPlaying,
@@ -213,7 +226,31 @@ fun ManagerPortalScreen(
                 attendanceList = allAttendance,
                 trucks = trucks
             )
+            5 -> ManagerShiftSettingsScreen(viewModel = viewModel)
+            6 -> ManagerDriverAssignmentsScreen(
+                drivers = drivers,
+                trucks = trucks,
+                onAssignTruck = { driverId, truckId -> viewModel.assignDriverToTruck(driverId, truckId) },
+                onEarlyLogoutChanged = { driverId, enabled -> viewModel.setDriverEarlyLogout(driverId, enabled) }
+            )
         }
+    }
+
+    driverPendingDeletion?.let { driver ->
+        AlertDialog(
+            onDismissRequest = { driverPendingDeletion = null },
+            title = { Text("Delete driver?") },
+            text = { Text("Remove ${driver.name} from this business? Their invitation will be deactivated and their driver membership removed.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteDriver(driver.id)
+                    driverPendingDeletion = null
+                }) { Text("Delete", color = StatusRedAlert) }
+            },
+            dismissButton = {
+                TextButton(onClick = { driverPendingDeletion = null }) { Text("Cancel") }
+            }
+        )
     }
 
     if (showAddTruckDialog) {
@@ -221,8 +258,12 @@ fun ManagerPortalScreen(
             nextTruckNumber = trucks.size + 1,
             onDismiss = { showAddTruckDialog = false },
             onAddTruck = { name, plate, driver, cap ->
-                viewModel.addTruck(name, plate, driver, cap)
+                pendingTruckName = name
+                pendingTruckPlate = plate
+                pendingTruckDriver = driver
+                pendingTruckCapacity = cap
                 showAddTruckDialog = false
+                showTestPaymentDialog = true
             }
         )
     }
@@ -235,6 +276,82 @@ fun ManagerPortalScreen(
                 showAddDriverDialog = false
             }
         )
+    }
+
+
+    if (showTestPaymentDialog) {
+        Dialog(onDismissRequest = { showTestPaymentDialog = false }) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 12.dp
+            ) {
+                Column(modifier = Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(OceanNavyPrimary), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.LocalShipping, contentDescription = null, tint = Color.White)
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Truck subscription", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("Checkout preview", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Surface(shape = RoundedCornerShape(12.dp), color = StatusAmberWarning.copy(alpha = 0.12f), modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.FlashOn, contentDescription = null, tint = StatusAmberWarning)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("TEST PAYMENT MODE", fontWeight = FontWeight.ExtraBold, color = StatusAmberWarning, fontSize = 12.sp)
+                                Text("No money will be charged. Demo checkout only.", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text("Order summary", fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Truck", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(pendingTruckName, fontWeight = FontWeight.SemiBold)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Registration", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(pendingTruckPlate, fontWeight = FontWeight.SemiBold)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Billing", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("₹99 / month", fontWeight = FontWeight.SemiBold)
+                        }
+                        androidx.compose.material3.HorizontalDivider()
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Total due today", fontWeight = FontWeight.Bold)
+                            Text("₹99", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold, color = OceanNavyPrimary)
+                        }
+                    }
+                    Text("Payment method", fontWeight = FontWeight.Bold)
+                    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, CyanWater.copy(alpha = 0.7f)), color = CyanWater.copy(alpha = 0.06f)) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = StatusActiveGreen)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("Demo payment", fontWeight = FontWeight.SemiBold)
+                                Text("UPI / Card flow simulated", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Spacer(modifier = Modifier.weight(1f))
+                            Text("TEST", fontWeight = FontWeight.ExtraBold, color = StatusActiveGreen, fontSize = 11.sp)
+                        }
+                    }
+                    Button(onClick = {
+                        viewModel.addTruck(pendingTruckName, pendingTruckPlate, pendingTruckDriver, pendingTruckCapacity)
+                        showTestPaymentDialog = false
+                    }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                        Text("Complete test payment • ₹99", modifier = Modifier.padding(vertical = 5.dp))
+                    }
+                    TextButton(onClick = { showTestPaymentDialog = false }, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+                    Text("Demo only • No payment provider is connected", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
     }
 
     if (showResetConfirmDialog) {
@@ -290,9 +407,11 @@ private fun FleetOverviewTab(
     onAddDriverClicked: () -> Unit,
     onSelectTruckForMap: (Int) -> Unit,
     onDeleteTruck: (Int) -> Unit,
+    onDeleteDriver: (DriverEntity) -> Unit = {},
     onEndShift: (Int) -> Unit = {},
     onResetAllClicked: () -> Unit = {}
 ) {
+    val clipboard = LocalClipboardManager.current
     val activeTrucksCount = trucks.count { it.isShiftActive }
 
     LazyColumn(
@@ -547,6 +666,36 @@ private fun FleetOverviewTab(
                             IconButton(onClick = { onDeleteTruck(truck.id) }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.outline)
                             }
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Registered drivers (${drivers.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                if (drivers.isEmpty()) {
+                    Text("No drivers added yet. Tap Add Driver to register your first driver.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        items(drivers) { driver ->
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(driver.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(driver.phone.ifBlank { "No phone number added" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (driver.userUid.isNullOrBlank()) "Waiting for driver to join" else "Account linked", style = MaterialTheme.typography.labelSmall, color = StatusActiveGreen)
+                    if (driver.userUid.isNullOrBlank() && !driver.invitationCode.isNullOrBlank()) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Code: ${driver.invitationCode}", fontWeight = FontWeight.Bold)
+                            TextButton(onClick = { clipboard.setText(AnnotatedString(driver.invitationCode!!)) }) { Text("Copy code") }
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { onDeleteDriver(driver) }) {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = StatusRedAlert, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Delete driver", color = StatusRedAlert)
                         }
                     }
                 }

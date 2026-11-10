@@ -14,6 +14,8 @@ import com.example.data.model.StopRecord
 import com.example.data.model.TruckEntity
 import com.example.data.model.VoiceDeliveryNote
 import com.example.data.sync.LocationSyncScheduler
+import com.example.data.tenant.DriverShiftPolicy
+import com.example.data.tenant.TenantManager
 import com.example.service.LocationTrackingService
 import com.example.util.AudioPlayerManager
 import com.example.util.AudioRecorderManager
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -44,6 +47,9 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
 
     val audioRecorder = AudioRecorderManager(application)
     val audioPlayer = AudioPlayerManager()
+
+    private val _voiceUploadStatus = MutableStateFlow("Idle")
+    val voiceUploadStatus: StateFlow<String> = _voiceUploadStatus.asStateFlow()
 
     val allTrucks: StateFlow<List<TruckEntity>> = dao.getAllTrucks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -84,18 +90,6 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
 
     val allAttendanceHistory: StateFlow<List<AttendanceRecord>> = dao.getAllAttendance()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    // Dark Theme Mode (null = follow system, true = force dark, false = force light)
-    private val _isDarkTheme = MutableStateFlow<Boolean?>(null)
-    val isDarkTheme: StateFlow<Boolean?> = _isDarkTheme.asStateFlow()
-
-    fun toggleDarkTheme(isCurrentlyDark: Boolean) {
-        _isDarkTheme.value = !isCurrentlyDark
-    }
-
-    fun setDarkTheme(dark: Boolean?) {
-        _isDarkTheme.value = dark
-    }
 
     // 7-Day Route History Filter (Default: 7 days)
     private val _historyDaysFilter = MutableStateFlow(7)
@@ -138,30 +132,16 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Route history filtered by the manager's chosen calendar date
-    val locationHistoryByDate: StateFlow<List<LocationPoint>> = kotlinx.coroutines.flow.combine(
-        _selectedTruckId,
-        _selectedDateMillis
-    ) { truckId, dateMillis ->
+    val locationHistoryByDate: StateFlow<List<LocationPoint>> = _selectedDateMillis.flatMapLatest { dateMillis ->
         val (startOfDay, endOfDay) = getDayRange(dateMillis)
-        if (truckId != null) {
-            dao.getLocationsForTruckBetween(truckId, startOfDay, endOfDay)
-        } else {
-            dao.getLocationsBetween(startOfDay, endOfDay)
-        }
-    }.flatMapLatest { it }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        dao.getLocationsBetween(startOfDay, endOfDay)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Stop records filtered by the manager's chosen calendar date
-    val stopsByDate: StateFlow<List<StopRecord>> = kotlinx.coroutines.flow.combine(
-        _selectedTruckId,
-        _selectedDateMillis
-    ) { truckId, dateMillis ->
+    val stopsByDate: StateFlow<List<StopRecord>> = _selectedDateMillis.flatMapLatest { dateMillis ->
         val (startOfDay, endOfDay) = getDayRange(dateMillis)
-        if (truckId != null) {
-            dao.getStopsForTruckBetween(truckId, startOfDay, endOfDay)
-        } else {
-            dao.getStopsBetween(startOfDay, endOfDay)
-        }
-    }.flatMapLatest { it }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        dao.getStopsBetween(startOfDay, endOfDay)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Voice delivery notes filtered by chosen calendar date
     val voiceNotesByDate: StateFlow<List<VoiceDeliveryNote>> = _selectedDateMillis.flatMapLatest { dateMillis ->
@@ -203,6 +183,15 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     val allDeliveryProofs: StateFlow<List<DeliveryProof>> = dao.getAllProofs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val _shiftPolicy = MutableStateFlow(DriverShiftPolicy())
+    val shiftPolicy: StateFlow<DriverShiftPolicy> = _shiftPolicy.asStateFlow()
+    private val _earlyLogoutAllowed = MutableStateFlow(false)
+    val earlyLogoutAllowed: StateFlow<Boolean> = _earlyLogoutAllowed.asStateFlow()
+    private val _assignedDriverTruckId = MutableStateFlow<Int?>(TenantManager.assignedTruckId(application))
+    val assignedDriverTruckId: StateFlow<Int?> = _assignedDriverTruckId.asStateFlow()
+    private var shiftPolicyJob: Job? = null
+    private var earlyLogoutJob: Job? = null
+
     private val _currentRole = MutableStateFlow(UserRole.DRIVER)
     val currentRole: StateFlow<UserRole> = _currentRole.asStateFlow()
 
@@ -217,6 +206,12 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     private var simulationJob: Job? = null
 
     init {
+        // Enforce 30-day local breadcrumb retention even when the device has no network.
+        viewModelScope.launch(Dispatchers.IO) {
+            val cutoff = System.currentTimeMillis() - java.util.concurrent.TimeUnit.DAYS.toMillis(30)
+            dao.deleteLocationPointsBefore(cutoff)
+        }
+
         // Restore active driver session across app closes / process death
         val savedTruckId = sessionPrefs.getInt("session_truck_id", -1)
         val savedDriverName = sessionPrefs.getString("session_driver_name", null)
@@ -236,30 +231,82 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                         _loggedInDriverName.value = null
                         sessionPrefs.edit().clear().apply()
                     }
-                } else {
-                    val activeTruck = list.firstOrNull { it.isShiftActive }
-                    if (activeTruck != null) {
-                        _loggedInTruckId.value = activeTruck.id
-                        _selectedTruckId.value = activeTruck.id
-                        _loggedInDriverName.value = activeTruck.driverName
-                        sessionPrefs.edit()
-                            .putInt("session_truck_id", activeTruck.id)
-                            .putString("session_driver_name", activeTruck.driverName)
-                            .apply()
-                    } else if (_selectedTruckId.value == null && list.isNotEmpty()) {
-                        _selectedTruckId.value = list.first().id
-                    }
+                } else if (TenantManager.role(getApplication()) == "driver") {
+                    // A truck can be active on another driver's device. Do not infer that
+                    // this Firebase user owns the live shift merely from truck.isShiftActive.
+                    val assigned = TenantManager.assignedTruckId(getApplication())
+                    _selectedTruckId.value = assigned?.takeIf { id -> list.any { it.id == id } }
+                } else if (_selectedTruckId.value == null && list.isNotEmpty()) {
+                    _selectedTruckId.value = list.first().id
                 }
             }
         }
     }
 
+    fun refreshTenantContext() {
+        shiftPolicyJob?.cancel()
+        earlyLogoutJob?.cancel()
+        shiftPolicyJob = viewModelScope.launch {
+            TenantManager.observeShiftPolicy(getApplication()).collect { _shiftPolicy.value = it }
+        }
+        earlyLogoutJob = viewModelScope.launch {
+            TenantManager.observeOwnEarlyLogout(getApplication()).collect { _earlyLogoutAllowed.value = it }
+        }
+        viewModelScope.launch {
+            TenantManager.observeAssignedTruckId(getApplication()).collect { assigned ->
+                val previous = _assignedDriverTruckId.value
+                _assignedDriverTruckId.value = assigned
+                if (assigned != null && assigned > 0) {
+                    // Preserve the in-progress session tanker after a driver temporarily
+                    // switches away from their manager-default assignment.
+                    if (_loggedInTruckId.value == null) {
+                        _selectedTruckId.value = assigned
+                    }
+                    sessionPrefs.edit().putInt("assigned_truck_id", assigned).apply()
+                    if (previous != assigned) {
+                        runCatching { TenantManager.refreshFleetCache(getApplication()) }
+                    }
+                }
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { TenantManager.refreshFleetCache(getApplication()) }
+        }
+    }
+
+    fun saveShiftPolicy(policy: DriverShiftPolicy) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { TenantManager.saveShiftPolicy(getApplication(), policy) }
+        }
+    }
+
+    fun assignDriverToTruck(driverId: Long, truckId: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val driver = allDrivers.value.firstOrNull { it.id == driverId } ?: return@launch
+            val updated = driver.copy(assignedTruckId = truckId)
+            runCatching { TenantManager.assignDriverToTruck(getApplication(), updated, truckId) }
+                .onSuccess { dao.insertDriver(updated) }
+        }
+    }
+
+    fun setDriverEarlyLogout(driverId: Long, enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val driver = allDrivers.value.firstOrNull { it.id == driverId } ?: return@launch
+            val updated = driver.copy(earlyLogoutEnabled = enabled)
+            runCatching { TenantManager.setDriverEarlyLogout(getApplication(), updated, enabled) }
+                .onSuccess { dao.insertDriver(updated) }
+        }
+    }
+
     fun setRole(role: UserRole) {
+        if (role == UserRole.MANAGER) {
+            if (TenantManager.role(getApplication()) != "manager" || !_isManagerUnlocked.value) return
+        }
         _currentRole.value = role
     }
 
     fun unlockManager(pin: String): Boolean {
-        return if (pin == "1234") {
+        return if (TenantManager.verifyManagerPin(getApplication(), pin)) {
             _isManagerUnlocked.value = true
             _currentRole.value = UserRole.MANAGER
             true
@@ -296,6 +343,8 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 isShiftActive = false,
                 statusText = "Off Duty"
             )
+            val subscriptionSaved = firestoreSync.recordTestTruckSubscription(nextId)
+            if (!subscriptionSaved) return@launch
             dao.insertTruck(newTruck)
             firestoreSync.syncTruck(newTruck)
             if (_selectedTruckId.value == null) {
@@ -319,7 +368,8 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             val driver = DriverEntity(
                 name = name,
                 phone = phone,
-                assignedTruckId = _selectedTruckId.value ?: 1
+                assignedTruckId = _selectedTruckId.value ?: allTrucks.value.firstOrNull()?.id ?: 0,
+                invitationCode = TenantManager.generateDriverInviteCode()
             )
             val id = dao.insertDriver(driver)
             firestoreSync.syncDriver(driver.copy(id = id))
@@ -327,9 +377,11 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteDriver(driverId: Long) {
+        if (TenantManager.role(getApplication()) != "manager" || !_isManagerUnlocked.value) return
         viewModelScope.launch(Dispatchers.IO) {
+            val driver = allDrivers.value.firstOrNull { it.id == driverId } ?: return@launch
+            if (!firestoreSync.deleteDriver(driver)) return@launch
             dao.deleteDriver(driverId)
-            firestoreSync.deleteDriver(driverId)
         }
     }
 
@@ -337,6 +389,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     fun startDriverShift(truckId: Int, driverName: String, selfieUri: String?, context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             val truck = dao.getTruckByIdDirect(truckId) ?: return@launch
+            if (truck.isShiftActive && _loggedInTruckId.value != truckId) return@launch
             val now = System.currentTimeMillis()
 
             // 1. Lock driver session to this truck & driver identity and persist to SharedPreferences
@@ -398,6 +451,83 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun switchDriverTruck(newTruckId: Int, context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val oldTruckId = _loggedInTruckId.value ?: return@launch
+            if (newTruckId == oldTruckId) return@launch
+            val newTruck = dao.getTruckByIdDirect(newTruckId) ?: return@launch
+            if (newTruck.isShiftActive) return@launch
+
+            val now = System.currentTimeMillis()
+            val oldAttendance = dao.getActiveAttendanceDirect(oldTruckId)
+            if (oldAttendance != null) {
+                val completed = oldAttendance.copy(checkOutTime = now, isCompleted = true)
+                dao.updateAttendance(completed)
+                firestoreSync.syncAttendance(completed)
+            }
+
+            val oldTruck = dao.getTruckByIdDirect(oldTruckId)
+            if (oldTruck != null) {
+                val offDuty = oldTruck.copy(
+                    isShiftActive = false,
+                    statusText = "Off Duty",
+                    currentSpeedKmh = 0f,
+                    lastUpdated = now
+                )
+                dao.updateTruck(offDuty)
+                firestoreSync.syncTruck(offDuty)
+            }
+
+            val driverName = _loggedInDriverName.value ?: "Driver"
+            _loggedInTruckId.value = newTruckId
+            _selectedTruckId.value = newTruckId
+            sessionPrefs.edit()
+                .putInt("session_truck_id", newTruckId)
+                .putString("session_driver_name", driverName)
+                .putLong("session_start_time", now)
+                .apply()
+
+            val location = runCatching { com.example.util.LocationUtils.getCurrentLocation(context) }.getOrNull()
+            val lat = location?.latitude ?: newTruck.currentLat
+            val lng = location?.longitude ?: newTruck.currentLng
+            val attendance = AttendanceRecord(
+                truckId = newTruckId,
+                driverName = driverName,
+                selfieUri = null,
+                checkInTime = now,
+                checkInLat = lat,
+                checkInLng = lng,
+                isCompleted = false
+            )
+            val attendanceId = dao.insertAttendance(attendance)
+            firestoreSync.syncAttendance(attendance.copy(id = attendanceId))
+
+            val activeTruck = newTruck.copy(
+                isShiftActive = true,
+                driverName = driverName,
+                currentLat = lat,
+                currentLng = lng,
+                statusText = "Shift Active - En Route",
+                lastUpdated = now
+            )
+            dao.updateTruck(activeTruck)
+            firestoreSync.syncTruck(activeTruck)
+
+            if (lat != 0.0 || lng != 0.0) {
+                dao.insertLocationPoint(LocationPoint(
+                    truckId = newTruckId,
+                    latitude = lat,
+                    longitude = lng,
+                    speedKmh = 0f,
+                    accuracyMeters = location?.accuracy ?: 5f,
+                    timestamp = now
+                ))
+                LocationSyncScheduler.enqueue(context)
+            }
+            LocationTrackingService.startService(context, newTruckId, newTruck.name)
+        }
+    }
+
     fun endDriverShift(truckId: Int, context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             val now = System.currentTimeMillis()
@@ -441,7 +571,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun verifyManagerPin(pin: String): Boolean {
-        return pin.trim() == "1234"
+        return TenantManager.verifyManagerPin(getApplication(), pin)
     }
 
     fun startVoiceDeliveryRecording(): Boolean {
@@ -501,8 +631,19 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 locationLabel = locationLabel,
                 timestamp = now
             )
-            val noteId = dao.insertVoiceNote(note)
-            firestoreSync.syncVoiceNote(note.copy(id = noteId))
+            val savedNoteId = dao.insertVoiceNote(note)
+            val savedNote = note.copy(id = savedNoteId)
+            _voiceUploadStatus.value = "Uploading voice recording…"
+
+            // Upload the recording immediately while its local file is guaranteed to exist.
+            // WorkManager remains the offline/retry fallback.
+            if (firestoreSync.syncVoiceNote(savedNote)) {
+                dao.markVoiceNotesSynced(listOf(savedNoteId))
+                _voiceUploadStatus.value = "Uploaded successfully"
+            } else {
+                _voiceUploadStatus.value = "Upload pending — will retry when connected"
+                LocationSyncScheduler.enqueue(context)
+            }
 
             // Save Stop Record
             val stop = StopRecord(
@@ -515,13 +656,26 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 addressOrLabel = "Water Delivery: $locationLabel",
                 category = "Delivery Stop"
             )
-            val stopId = dao.insertStop(stop)
+            dao.insertStop(stop)
             LocationSyncScheduler.enqueue(context)
         }
     }
 
     fun playVoiceNote(filePath: String) {
-        audioPlayer.togglePlay(filePath)
+        if (!com.example.data.firebase.SupabaseAudioStorage.isRemoteReference(filePath)) {
+            audioPlayer.togglePlay(filePath)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val cachedFile = withContext(Dispatchers.IO) {
+                    com.example.data.firebase.SupabaseAudioStorage.downloadToCache(getApplication(), filePath)
+                }
+                audioPlayer.togglePlay(cachedFile.absolutePath)
+            } catch (e: Exception) {
+                android.util.Log.e("FleetViewModel", "Unable to download voice recording", e)
+            }
+        }
     }
 
     fun deleteVoiceNote(id: Long) {

@@ -54,16 +54,28 @@ class LocationSyncWorker(
                     processedAny = true
                 }
 
+                val pendingVoiceNotes = dao.getPendingVoiceNotes()
+                if (pendingVoiceNotes.isNotEmpty()) {
+                    for (note in pendingVoiceNotes) {
+                        if (!syncManager.syncVoiceNote(note)) {
+                            dao.incrementVoiceNoteRetryCount(listOf(note.id))
+                            return Result.retry()
+                        }
+                        dao.markVoiceNotesSynced(listOf(note.id))
+                    }
+                    processedAny = true
+                }
+
                 if (!processedAny) break
                 completedBatches++
             }
 
             // Never delete pending records. Synced location history is retained for 30 days.
             val retentionCutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30)
-            dao.deleteSyncedLocationPointsBefore(retentionCutoff)
+            dao.deleteLocationPointsBefore(retentionCutoff)
 
             val hasPendingRecords =
-                dao.getPendingLocationCount() > 0 || dao.getPendingStopCount() > 0
+                dao.getPendingLocationCount() > 0 || dao.getPendingStopCount() > 0 || dao.getPendingVoiceNoteCount() > 0
 
             if (hasPendingRecords) {
                 Log.i("LocationSyncWorker", "Sync batch limit reached; remaining records will retry.")
@@ -92,14 +104,13 @@ object LocationSyncScheduler {
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
         val request = OneTimeWorkRequestBuilder<LocationSyncWorker>()
-            .setInitialDelay(2, TimeUnit.MINUTES)
             .setConstraints(constraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
 
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
             UNIQUE_WORK_NAME,
-            ExistingWorkPolicy.KEEP,
+            ExistingWorkPolicy.REPLACE,
             request
         )
     }

@@ -5,9 +5,11 @@ on:
     branches:
       - main
       - feat/offline-first-location-sync
+      - feat/multi-tenant-fleet-management
   pull_request:
     branches:
       - main
+      - feat/offline-first-location-sync
   workflow_dispatch:
 
 permissions:

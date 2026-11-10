@@ -10,7 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -119,7 +119,7 @@ fun InteractiveFleetMap(
     onDateSelected: ((Long) -> Unit)? = null,
     selectedHistoryDays: Int = 7,
     onHistoryDaysChanged: ((Int) -> Unit)? = null,
-    onTruckSelected: ((Int) -> Unit)? = null,
+    onTruckSelected: ((Int?) -> Unit)? = null,
     onPlayVoiceNote: ((String) -> Unit)? = null,
     isPlaying: Boolean = false,
     currentlyPlayingPath: String? = null
@@ -202,14 +202,20 @@ fun InteractiveFleetMap(
     val centerLng: Double
 
     if (hasFleetCoordinates) {
-        // Prioritize actively selected truck, then newest breadcrumb point, then active truck
-        val targetTruck = trucks.firstOrNull { it.id == selectedTruckId && it.currentLat != 0.0 }
-            ?: validTruckCoords.firstOrNull { it.isShiftActive }
-            ?: validTruckCoords.firstOrNull()
+        val targetTruck = if (selectedTruckId != null) {
+            trucks.firstOrNull { it.id == selectedTruckId && it.currentLat != 0.0 }
+        } else null
 
         if (targetTruck != null) {
             centerLat = targetTruck.currentLat
             centerLng = targetTruck.currentLng
+        } else if (selectedTruckId == null && validTruckCoords.isNotEmpty()) {
+            val minLat = validTruckCoords.minOf { it.currentLat }
+            val maxLat = validTruckCoords.maxOf { it.currentLat }
+            val minLng = validTruckCoords.minOf { it.currentLng }
+            val maxLng = validTruckCoords.maxOf { it.currentLng }
+            centerLat = (minLat + maxLat) / 2.0
+            centerLng = (minLng + maxLng) / 2.0
         } else {
             val lastPoint = validPointCoords.lastOrNull()
             centerLat = lastPoint?.latitude ?: 0.0
@@ -238,16 +244,48 @@ fun InteractiveFleetMap(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    panOffsetX += dragAmount.x
-                    panOffsetY += dragAmount.y
+                detectTransformGestures { _, pan, zoom, _ ->
+                    if (zoom.isFinite() && zoom > 0f) {
+                        zoomLevel = (zoomLevel * zoom).coerceIn(11f, 18f)
+                    }
+                    panOffsetX += pan.x
+                    panOffsetY += pan.y
                 }
             }
             .testTag("interactive_fleet_map")
     ) {
         val width = constraints.maxWidth.toFloat()
         val height = constraints.maxHeight.toFloat()
+
+        val fitZoomLevel = run {
+            if (validTruckCoords.isEmpty()) {
+                15.2f
+            } else {
+                val minLat = validTruckCoords.minOf { it.currentLat }
+                val maxLat = validTruckCoords.maxOf { it.currentLat }
+                val minLng = validTruckCoords.minOf { it.currentLng }
+                val maxLng = validTruckCoords.maxOf { it.currentLng }
+                val midLatRadians = Math.toRadians((minLat + maxLat) / 2.0)
+                val longitudeSpan = (maxLng - minLng) * kotlin.math.cos(midLatRadians).coerceAtLeast(0.15)
+                val latitudeSpan = maxLat - minLat
+                val safeWidth = (width * 0.78f).coerceAtLeast(1f)
+                val safeHeight = (height * 0.78f).coerceAtLeast(1f)
+                val safeLonSpan = longitudeSpan.coerceAtLeast(0.002)
+                val safeLatSpan = latitudeSpan.coerceAtLeast(0.002)
+                val zoomForLongitude = kotlin.math.ln((360.0 * 256.0) / (safeLonSpan * safeWidth)) / kotlin.math.ln(2.0)
+                val zoomForLatitude = kotlin.math.ln((360.0 * 256.0) / (safeLatSpan * safeHeight)) / kotlin.math.ln(2.0)
+                kotlin.math.min(zoomForLongitude, zoomForLatitude).toFloat().coerceIn(10.5f, 17.5f)
+            }
+        }
+        val fleetMarkerKey = validTruckCoords.map { it.id }.sorted().joinToString(",")
+
+        LaunchedEffect(selectedTruckId, fleetMarkerKey) {
+            if (validTruckCoords.isNotEmpty()) {
+                zoomLevel = if (selectedTruckId == null) fitZoomLevel else 15.5f
+                panOffsetX = 0f
+                panOffsetY = 0f
+            }
+        }
 
         val cx = width / 2f
         val cy = height / 2f
@@ -645,7 +683,7 @@ fun InteractiveFleetMap(
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             FilterChip(
                                 selected = selectedTruckId == null,
-                                onClick = { onTruckSelected?.invoke(0) },
+                                onClick = { onTruckSelected?.invoke(null) },
                                 label = { Text("All", fontSize = 11.sp) },
                                 modifier = Modifier.height(28.dp),
                                 colors = FilterChipDefaults.filterChipColors(
@@ -742,7 +780,7 @@ fun InteractiveFleetMap(
                 onClick = {
                     panOffsetX = 0f
                     panOffsetY = 0f
-                    zoomLevel = 15.5f
+                    zoomLevel = if (selectedTruckId == null) fitZoomLevel else 15.5f
                 },
                 modifier = Modifier
                     .size(42.dp)
