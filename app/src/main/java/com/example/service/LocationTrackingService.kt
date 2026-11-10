@@ -134,8 +134,15 @@ class LocationTrackingService : Service() {
 
         locationProcessorJob = serviceScope.launch {
             for (location in locationChannel) {
-                updateTrackingMode(location)
-                handleNewLocation(location)
+                try {
+                    updateTrackingMode(location)
+                    handleNewLocation(location)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // One bad sample must not terminate the processor for all later GPS updates.
+                    Log.e("LocationTrackingService", "Failed to process location sample", e)
+                }
             }
         }
     }
