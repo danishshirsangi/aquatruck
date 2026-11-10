@@ -389,11 +389,11 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                     accuracyMeters = loc?.accuracy ?: 3f,
                     timestamp = now
                 )
-                val ptId = dao.insertLocationPoint(pt)
+                dao.insertLocationPoint(pt)
                 LocationSyncScheduler.enqueue(context)
             }
 
-            // 5. Start Foreground Service for continuous 10s background tracking
+            // 5. Start adaptive foreground GPS tracking
             LocationTrackingService.startService(context, truckId, truck.name)
         }
     }
@@ -486,7 +486,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                     accuracyMeters = freshLocation?.accuracy ?: 3f,
                     timestamp = now
                 )
-                val ptId = dao.insertLocationPoint(point)
+                dao.insertLocationPoint(point)
                 LocationSyncScheduler.enqueue(context)
             }
 
