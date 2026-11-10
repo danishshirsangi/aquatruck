@@ -461,7 +461,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             if (oldTruck != null) {
                 val offDuty = oldTruck.copy(
                     isShiftActive = false,
-                    statusText = "Driver switched tanker",
+                    statusText = "Off Duty",
                     currentSpeedKmh = 0f,
                     lastUpdated = now
                 )
@@ -484,6 +484,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             val attendance = AttendanceRecord(
                 truckId = newTruckId,
                 driverName = driverName,
+                selfieUri = null,
                 checkInTime = now,
                 checkInLat = lat,
                 checkInLng = lng,
