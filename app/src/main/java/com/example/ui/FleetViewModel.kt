@@ -87,18 +87,6 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     val allAttendanceHistory: StateFlow<List<AttendanceRecord>> = dao.getAllAttendance()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Dark Theme Mode (null = follow system, true = force dark, false = force light)
-    private val _isDarkTheme = MutableStateFlow<Boolean?>(null)
-    val isDarkTheme: StateFlow<Boolean?> = _isDarkTheme.asStateFlow()
-
-    fun toggleDarkTheme(isCurrentlyDark: Boolean) {
-        _isDarkTheme.value = !isCurrentlyDark
-    }
-
-    fun setDarkTheme(dark: Boolean?) {
-        _isDarkTheme.value = dark
-    }
-
     // 7-Day Route History Filter (Default: 7 days)
     private val _historyDaysFilter = MutableStateFlow(7)
     val historyDaysFilter: StateFlow<Int> = _historyDaysFilter.asStateFlow()
@@ -447,6 +435,86 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
 
             // 5. Start adaptive foreground GPS tracking
             LocationTrackingService.startService(context, truckId, truck.name)
+        }
+    }
+
+    fun switchDriverTruck(newTruckId: Int, context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val oldTruckId = _loggedInTruckId.value ?: return@launch
+            if (newTruckId == oldTruckId) return@launch
+            val newTruck = dao.getTruckByIdDirect(newTruckId) ?: return@launch
+            if (newTruck.isShiftActive) return@launch
+
+            val now = System.currentTimeMillis()
+            val oldAttendance = dao.getActiveAttendanceDirect(oldTruckId)
+            if (oldAttendance != null) {
+                val completed = oldAttendance.copy(checkOutTime = now, isCompleted = true)
+                dao.updateAttendance(completed)
+                firestoreSync.syncAttendance(completed)
+            }
+
+            val oldTruck = dao.getTruckByIdDirect(oldTruckId)
+            if (oldTruck != null) {
+                val offDuty = oldTruck.copy(
+                    isShiftActive = false,
+                    statusText = "Driver switched tanker",
+                    currentSpeedKmh = 0f,
+                    lastUpdated = now
+                )
+                dao.updateTruck(offDuty)
+                firestoreSync.syncTruck(offDuty)
+            }
+
+            // Stop the old foreground tracker before starting a new tracker identity.
+            LocationTrackingService.stopService(context)
+            delay(1_500L)
+
+            val driverName = _loggedInDriverName.value ?: "Driver"
+            _loggedInTruckId.value = newTruckId
+            _selectedTruckId.value = newTruckId
+            sessionPrefs.edit()
+                .putInt("session_truck_id", newTruckId)
+                .putString("session_driver_name", driverName)
+                .putLong("session_start_time", now)
+                .apply()
+
+            val location = runCatching { com.example.util.LocationUtils.getCurrentLocation(context) }.getOrNull()
+            val lat = location?.latitude ?: newTruck.currentLat
+            val lng = location?.longitude ?: newTruck.currentLng
+            val attendance = AttendanceRecord(
+                truckId = newTruckId,
+                driverName = driverName,
+                checkInTime = now,
+                checkInLat = lat,
+                checkInLng = lng,
+                isCompleted = false
+            )
+            val attendanceId = dao.insertAttendance(attendance)
+            firestoreSync.syncAttendance(attendance.copy(id = attendanceId))
+
+            val activeTruck = newTruck.copy(
+                isShiftActive = true,
+                driverName = driverName,
+                currentLat = lat,
+                currentLng = lng,
+                statusText = "Shift Active - En Route",
+                lastUpdated = now
+            )
+            dao.updateTruck(activeTruck)
+            firestoreSync.syncTruck(activeTruck)
+
+            if (lat != 0.0 || lng != 0.0) {
+                dao.insertLocationPoint(LocationPoint(
+                    truckId = newTruckId,
+                    latitude = lat,
+                    longitude = lng,
+                    speedKmh = 0f,
+                    accuracyMeters = location?.accuracy ?: 5f,
+                    timestamp = now
+                ))
+                LocationSyncScheduler.enqueue(context)
+            }
+            LocationTrackingService.startService(context, newTruckId, newTruck.name)
         }
     }
 
