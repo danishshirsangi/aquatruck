@@ -373,7 +373,7 @@ fun DriverPortalScreen(
                                 Card(
                                     modifier = Modifier
                                         .width(155.dp)
-                                        .clickable { viewModel.selectTruck(truck.id) }
+                                        .clickable(enabled = !truck.isShiftActive) { viewModel.selectTruck(truck.id) }
                                         .testTag("select_truck_${truck.id}"),
                                     shape = RoundedCornerShape(18.dp),
                                     colors = CardDefaults.cardColors(
@@ -498,10 +498,20 @@ fun DriverPortalScreen(
                                     }
                                 }
 
+                                if (truck.isShiftActive) {
+                                    Text(
+                                        "This truck already has an active shift. Ask your manager to assign an available truck.",
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+
                                 Spacer(modifier = Modifier.height(14.dp))
 
                                 Button(
                                     onClick = { showSelfieDialog = true },
+                                    enabled = !truck.isShiftActive,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(58.dp)

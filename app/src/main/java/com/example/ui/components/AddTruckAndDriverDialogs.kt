@@ -204,7 +204,7 @@ fun AddDriverDialog(
                 OutlinedTextField(
                     value = phone,
                     onValueChange = { phone = it },
-                    label = { Text("Phone Number") },
+                    label = { Text("Phone Number (required for invitation)") },
                     placeholder = { Text("e.g. +1 555-0199") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     modifier = Modifier.fillMaxWidth(),
@@ -216,10 +216,11 @@ fun AddDriverDialog(
 
                 Button(
                     onClick = {
-                        if (driverName.isNotBlank()) {
+                        if (driverName.isNotBlank() && phone.filter { it.isDigit() }.length >= 8) {
                             onAddDriver(driverName, phone)
                         }
                     },
+                    enabled = driverName.isNotBlank() && phone.filter { it.isDigit() }.length >= 8,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp)

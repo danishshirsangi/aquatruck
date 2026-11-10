@@ -239,19 +239,13 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                         _loggedInDriverName.value = null
                         sessionPrefs.edit().clear().apply()
                     }
-                } else {
-                    val activeTruck = list.firstOrNull { it.isShiftActive }
-                    if (activeTruck != null) {
-                        _loggedInTruckId.value = activeTruck.id
-                        _selectedTruckId.value = activeTruck.id
-                        _loggedInDriverName.value = activeTruck.driverName
-                        sessionPrefs.edit()
-                            .putInt("session_truck_id", activeTruck.id)
-                            .putString("session_driver_name", activeTruck.driverName)
-                            .apply()
-                    } else if (_selectedTruckId.value == null && list.isNotEmpty()) {
-                        _selectedTruckId.value = list.first().id
-                    }
+                } else if (TenantManager.role(getApplication()) == "driver") {
+                    // A truck can be active on another driver's device. Do not infer that
+                    // this Firebase user owns the live shift merely from truck.isShiftActive.
+                    val assigned = TenantManager.assignedTruckId(getApplication())
+                    _selectedTruckId.value = assigned?.takeIf { id -> list.any { it.id == id } }
+                } else if (_selectedTruckId.value == null && list.isNotEmpty()) {
+                    _selectedTruckId.value = list.first().id
                 }
             }
         }
@@ -268,10 +262,14 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             TenantManager.observeAssignedTruckId(getApplication()).collect { assigned ->
+                val previous = _assignedDriverTruckId.value
                 _assignedDriverTruckId.value = assigned
                 if (assigned != null && assigned > 0) {
                     _selectedTruckId.value = assigned
                     sessionPrefs.edit().putInt("assigned_truck_id", assigned).apply()
+                    if (previous != assigned) {
+                        runCatching { TenantManager.refreshFleetCache(getApplication()) }
+                    }
                 }
             }
         }
@@ -390,6 +388,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     fun startDriverShift(truckId: Int, driverName: String, selfieUri: String?, context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             val truck = dao.getTruckByIdDirect(truckId) ?: return@launch
+            if (truck.isShiftActive && _loggedInTruckId.value != truckId) return@launch
             val now = System.currentTimeMillis()
 
             // 1. Lock driver session to this truck & driver identity and persist to SharedPreferences

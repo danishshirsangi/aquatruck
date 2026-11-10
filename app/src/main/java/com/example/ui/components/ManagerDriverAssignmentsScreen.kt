@@ -70,8 +70,10 @@ fun ManagerDriverAssignmentsScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    driver.invitationCode?.let { code ->
-                        Text("One-time driver code: $code", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    if (driver.userUid.isNullOrBlank()) {
+                        driver.invitationCode?.let { code ->
+                            Text("One-time driver code: $code", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        }
                     }
                     val assignedTruckIsActive = trucks.firstOrNull { it.id == driver.assignedTruckId }?.isShiftActive == true
                     Button(
@@ -96,6 +98,7 @@ fun ManagerDriverAssignmentsScreen(
                         trucks.forEach { truck ->
                             DropdownMenuItem(
                                 text = { Text("${truck.name} (${truck.plateNumber})") },
+                                enabled = !truck.isShiftActive,
                                 onClick = {
                                     onAssignTruck(driver.id, truck.id)
                                     expandedDriverId = null
