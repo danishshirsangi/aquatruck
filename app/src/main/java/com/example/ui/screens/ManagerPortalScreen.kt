@@ -97,7 +97,6 @@ fun ManagerPortalScreen(
     val context = LocalContext.current
     val trucks by viewModel.allTrucks.collectAsState()
     val drivers by viewModel.allDrivers.collectAsState()
-    val allLocations by viewModel.allRecentLocations.collectAsState()
     val allStops by viewModel.allStops.collectAsState()
     val allAttendance by viewModel.allAttendanceHistory.collectAsState()
     val allVoiceNotes by viewModel.allVoiceNotes.collectAsState()
