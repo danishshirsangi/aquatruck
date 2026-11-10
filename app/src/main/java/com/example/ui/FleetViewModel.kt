@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -655,7 +656,20 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playVoiceNote(filePath: String) {
-        audioPlayer.togglePlay(filePath)
+        if (!com.example.data.firebase.SupabaseAudioStorage.isRemoteReference(filePath)) {
+            audioPlayer.togglePlay(filePath)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val cachedFile = withContext(Dispatchers.IO) {
+                    com.example.data.firebase.SupabaseAudioStorage.downloadToCache(getApplication(), filePath)
+                }
+                audioPlayer.togglePlay(cachedFile.absolutePath)
+            } catch (e: Exception) {
+                android.util.Log.e("FleetViewModel", "Unable to download voice recording", e)
+            }
+        }
     }
 
     fun deleteVoiceNote(id: Long) {
