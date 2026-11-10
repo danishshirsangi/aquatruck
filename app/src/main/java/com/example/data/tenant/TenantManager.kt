@@ -59,13 +59,34 @@ object TenantManager {
     fun hasActiveOrganization(context: Context): Boolean =
         !organizationId(context).isNullOrBlank() && !role(context).isNullOrBlank()
 
-    private fun rememberMembership(context: Context, orgId: String, memberRole: String, name: String, code: String? = null, assignedTruckId: Int? = null) {
+    private suspend fun rememberMembership(context: Context, orgId: String, memberRole: String, name: String, code: String? = null, assignedTruckId: Int? = null) {
+        val previousOrgId = organizationId(context)
+        if (!previousOrgId.isNullOrBlank() && previousOrgId != orgId) {
+            // A device can be shared or change signed-in accounts. Do not let the next
+            // business inherit the previous business's local fleet/history cache.
+            runCatching {
+                com.example.service.LocationTrackingService.stopService(context)
+            }
+            val dao = com.example.data.db.AppDatabase.getDatabase(context).fleetDao()
+            dao.clearAllLocationPoints()
+            dao.clearAllStopRecords()
+            dao.clearAllVoiceNotes()
+            dao.clearAllAttendance()
+            dao.clearAllTrucks()
+            dao.clearAllDrivers()
+            dao.clearAllDeliveryProofs()
+            context.getSharedPreferences("aquatrack_session_prefs", Context.MODE_PRIVATE)
+                .edit().clear().apply()
+            context.getSharedPreferences("aquatrack_tracking_service", Context.MODE_PRIVATE)
+                .edit().clear().apply()
+        }
+
         prefs(context).edit()
             .putString(KEY_ORG, orgId)
             .putString(KEY_ROLE, memberRole)
             .putString(KEY_BUSINESS_NAME, name)
             .apply {
-                if (code != null) putString(KEY_BUSINESS_CODE, code)
+                if (code != null) putString(KEY_BUSINESS_CODE, code) else remove(KEY_BUSINESS_CODE)
                 if (assignedTruckId != null) putInt(KEY_ASSIGNED_TRUCK_ID, assignedTruckId)
                 else remove(KEY_ASSIGNED_TRUCK_ID)
             }
