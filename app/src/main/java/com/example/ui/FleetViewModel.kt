@@ -465,10 +465,6 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 firestoreSync.syncTruck(offDuty)
             }
 
-            // Stop the old foreground tracker before starting a new tracker identity.
-            LocationTrackingService.stopService(context)
-            delay(1_500L)
-
             val driverName = _loggedInDriverName.value ?: "Driver"
             _loggedInTruckId.value = newTruckId
             _selectedTruckId.value = newTruckId
