@@ -99,6 +99,7 @@ fun DriverPortalScreen(
     val selectedTruck by viewModel.selectedTruck.collectAsState()
     val activeAttendance by viewModel.activeAttendance.collectAsState()
     val selectedTruckStops by viewModel.selectedTruckStops.collectAsState()
+    val shiftPolicy by viewModel.shiftPolicy.collectAsState()
 
     // Driver identity selection state
     var selectedDriverName by remember { mutableStateOf<String?>(null) }
@@ -122,13 +123,11 @@ fun DriverPortalScreen(
     // Session lock & shift active status: persists across app closes
     val isShiftActive = (loggedInTruckId != null && effectiveTruck?.isShiftActive == true)
 
-    // 9:00 PM (21:00) Logout Gate Check
-    val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-    val isAfter9Pm = currentHour >= 21
-
-    var showEarlyLogoutDialog by remember { mutableStateOf(false) }
-    var earlyLogoutPinInput by remember { mutableStateOf("") }
-    var earlyLogoutPinError by remember { mutableStateOf(false) }
+    // Time unlocks the logout button only. The shift continues until the driver manually logs out.
+    val currentCalendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone(shiftPolicy.timezone))
+    val currentMinutes = currentCalendar.get(java.util.Calendar.HOUR_OF_DAY) * 60 +
+        currentCalendar.get(java.util.Calendar.MINUTE)
+    val isLogoutAllowed = shiftPolicy.allowEarlyLogout || currentMinutes >= shiftPolicy.logoutTimeMinutes
 
     // Voice recording & playback state
     val isRecording by viewModel.audioRecorder.isRecording.collectAsState()
@@ -841,8 +840,8 @@ fun DriverPortalScreen(
                             }
                         }
 
-                        // ================= SHIFT END / LOG OUT (9:00 PM LOCK) =================
-                        if (isAfter9Pm) {
+                        // ================= SHIFT END / LOG OUT =================
+                        if (isLogoutAllowed) {
                             // After 9:00 PM: Driver is allowed to log out directly
                             Button(
                                 onClick = { viewModel.endDriverShift(truck.id, context) },
@@ -896,7 +895,7 @@ fun DriverPortalScreen(
                                     Spacer(modifier = Modifier.height(10.dp))
 
                                     Text(
-                                        text = "SHIFT LOCKED UNTIL 9:00 PM",
+                                        text = "SHIFT LOCKED UNTIL ${shiftPolicy.formattedLogoutTime()}",
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 15.sp,
                                         color = OceanNavyPrimary
@@ -905,35 +904,18 @@ fun DriverPortalScreen(
                                     Spacer(modifier = Modifier.height(4.dp))
 
                                     Text(
-                                        text = "Driver logout is locked until 9:00 PM (21:00). To log out before 9:00 PM, Manager PIN authorization is required.",
+                                        text = "Logout becomes available at ${shiftPolicy.formattedLogoutTime()}. Your shift and GPS tracking will continue until you manually log out. Ask your manager to enable early logout if needed.",
                                         textAlign = TextAlign.Center,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
 
-                                    Spacer(modifier = Modifier.height(14.dp))
-
-                                    Button(
-                                        onClick = {
-                                            earlyLogoutPinInput = ""
-                                            earlyLogoutPinError = false
-                                            showEarlyLogoutDialog = true
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(50.dp)
-                                            .testTag("manager_early_logout_button"),
-                                        colors = ButtonDefaults.buttonColors(containerColor = OceanNavyPrimary),
-                                        shape = RoundedCornerShape(14.dp)
-                                    ) {
-                                        Icon(Icons.Default.VerifiedUser, contentDescription = null, modifier = Modifier.size(20.dp), tint = CyanWater)
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "EARLY LOGOUT (MANAGER PIN REQUIRED)",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp
-                                        )
-                                    }
+                                    Text(
+                                        text = "Early logout is controlled by your fleet manager.",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        textAlign = TextAlign.Center
+                                    )
                                 }
                             }
                         }
@@ -942,81 +924,6 @@ fun DriverPortalScreen(
                 }
             }
         }
-    }
-
-    // Manager Early Logout PIN Dialog (Before 9:00 PM)
-    if (showEarlyLogoutDialog && effectiveTruck != null) {
-        AlertDialog(
-            onDismissRequest = { showEarlyLogoutDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Lock, contentDescription = null, tint = OceanNavyPrimary, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Manager Early Logout",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 18.sp,
-                        color = OceanNavyPrimary
-                    )
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Driver shift is locked until 9:00 PM. Please enter the Manager PIN (1234) to authorize ending this shift early:",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = earlyLogoutPinInput,
-                        onValueChange = {
-                            earlyLogoutPinInput = it
-                            earlyLogoutPinError = false
-                        },
-                        label = { Text("Manager PIN") },
-                        placeholder = { Text("1234") },
-                        singleLine = true,
-                        isError = earlyLogoutPinError,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("early_logout_pin_input"),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    if (earlyLogoutPinError) {
-                        Text(
-                            text = "Incorrect Manager PIN. Please try again.",
-                            color = StatusRedAlert,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (viewModel.verifyManagerPin(earlyLogoutPinInput)) {
-                            viewModel.endDriverShift(effectiveTruck.id, context)
-                            showEarlyLogoutDialog = false
-                        } else {
-                            earlyLogoutPinError = true
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = StatusRedAlert),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.testTag("confirm_early_logout_button")
-                ) {
-                    Text("Authorize & End Shift", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEarlyLogoutDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
     }
 
     // Selfie Attendance Dialog

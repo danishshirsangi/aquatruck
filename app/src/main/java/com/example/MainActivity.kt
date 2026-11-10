@@ -91,6 +91,10 @@ class MainActivity : ComponentActivity() {
                         if (tenantReady) fleetViewModel.refreshTenantContext()
                     }
 
+                    LaunchedEffect(tenantReady) {
+                        if (tenantReady) fleetViewModel.refreshTenantContext()
+                    }
+
                     if (currentUser == null) {
                         AuthScreen(
                             onAuthSuccess = {

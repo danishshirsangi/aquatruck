@@ -79,6 +79,7 @@ import com.example.ui.FleetViewModel
 import com.example.ui.components.AddDriverDialog
 import com.example.ui.components.AddTruckDialog
 import com.example.ui.components.InteractiveFleetMap
+import com.example.ui.components.ManagerShiftSettingsScreen
 import com.example.ui.theme.CyanWater
 import com.example.ui.theme.OceanNavyPrimary
 import com.example.ui.theme.StatusActiveGreen
@@ -119,8 +120,13 @@ fun ManagerPortalScreen(
     var showAddTruckDialog by remember { mutableStateOf(false) }
     var showAddDriverDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
+    var showTestPaymentDialog by remember { mutableStateOf(false) }
+    var pendingTruckName by remember { mutableStateOf("") }
+    var pendingTruckPlate by remember { mutableStateOf("") }
+    var pendingTruckDriver by remember { mutableStateOf("") }
+    var pendingTruckCapacity by remember { mutableIntStateOf(10000) }
 
-    val tabs = listOf("Fleet Overview", "Interactive Map", "Voice Deliveries", "Stop Logs", "Attendance")
+    val tabs = listOf("Fleet Overview", "Interactive Map", "Voice Deliveries", "Stop Logs", "Attendance", "Shift Settings")
 
     Column(
         modifier = modifier
@@ -187,7 +193,7 @@ fun ManagerPortalScreen(
                         selectedHistoryDays = historyDays,
                         onHistoryDaysChanged = { viewModel.setHistoryDays(it) },
                         onTruckSelected = { id ->
-                            filterTruckId = if (filterTruckId == id) null else id
+                            filterTruckId = if (id == null) null else if (filterTruckId == id) null else id
                         },
                         onPlayVoiceNote = { viewModel.playVoiceNote(it) },
                         isPlaying = isPlaying,
@@ -213,6 +219,7 @@ fun ManagerPortalScreen(
                 attendanceList = allAttendance,
                 trucks = trucks
             )
+            5 -> ManagerShiftSettingsScreen(viewModel = viewModel)
         }
     }
 
@@ -221,8 +228,12 @@ fun ManagerPortalScreen(
             nextTruckNumber = trucks.size + 1,
             onDismiss = { showAddTruckDialog = false },
             onAddTruck = { name, plate, driver, cap ->
-                viewModel.addTruck(name, plate, driver, cap)
+                pendingTruckName = name
+                pendingTruckPlate = plate
+                pendingTruckDriver = driver
+                pendingTruckCapacity = cap
                 showAddTruckDialog = false
+                showTestPaymentDialog = true
             }
         )
     }
@@ -233,6 +244,30 @@ fun ManagerPortalScreen(
             onAddDriver = { name, phone ->
                 viewModel.addDriver(name, phone)
                 showAddDriverDialog = false
+            }
+        )
+    }
+
+
+    if (showTestPaymentDialog) {
+        AlertDialog(
+            onDismissRequest = { showTestPaymentDialog = false },
+            title = { Text("Test truck subscription") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("A new truck requires a ₹99/month subscription.")
+                    Text("TEST MODE — no real payment will be collected.", color = StatusAmberWarning, fontWeight = FontWeight.Bold)
+                    Text("Truck: \${pendingTruckName} (\${pendingTruckPlate})")
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.addTruck(pendingTruckName, pendingTruckPlate, pendingTruckDriver, pendingTruckCapacity)
+                    showTestPaymentDialog = false
+                }) { Text("Simulate ₹99 payment") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTestPaymentDialog = false }) { Text("Cancel") }
             }
         )
     }

@@ -119,7 +119,7 @@ fun InteractiveFleetMap(
     onDateSelected: ((Long) -> Unit)? = null,
     selectedHistoryDays: Int = 7,
     onHistoryDaysChanged: ((Int) -> Unit)? = null,
-    onTruckSelected: ((Int) -> Unit)? = null,
+    onTruckSelected: ((Int?) -> Unit)? = null,
     onPlayVoiceNote: ((String) -> Unit)? = null,
     isPlaying: Boolean = false,
     currentlyPlayingPath: String? = null
@@ -202,14 +202,20 @@ fun InteractiveFleetMap(
     val centerLng: Double
 
     if (hasFleetCoordinates) {
-        // Prioritize actively selected truck, then newest breadcrumb point, then active truck
-        val targetTruck = trucks.firstOrNull { it.id == selectedTruckId && it.currentLat != 0.0 }
-            ?: validTruckCoords.firstOrNull { it.isShiftActive }
-            ?: validTruckCoords.firstOrNull()
+        val targetTruck = if (selectedTruckId != null) {
+            trucks.firstOrNull { it.id == selectedTruckId && it.currentLat != 0.0 }
+        } else null
 
         if (targetTruck != null) {
             centerLat = targetTruck.currentLat
             centerLng = targetTruck.currentLng
+        } else if (selectedTruckId == null && validTruckCoords.isNotEmpty()) {
+            val minLat = validTruckCoords.minOf { it.currentLat }
+            val maxLat = validTruckCoords.maxOf { it.currentLat }
+            val minLng = validTruckCoords.minOf { it.currentLng }
+            val maxLng = validTruckCoords.maxOf { it.currentLng }
+            centerLat = (minLat + maxLat) / 2.0
+            centerLng = (minLng + maxLng) / 2.0
         } else {
             val lastPoint = validPointCoords.lastOrNull()
             centerLat = lastPoint?.latitude ?: 0.0
@@ -645,7 +651,7 @@ fun InteractiveFleetMap(
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             FilterChip(
                                 selected = selectedTruckId == null,
-                                onClick = { onTruckSelected?.invoke(0) },
+                                onClick = { onTruckSelected?.invoke(null) },
                                 label = { Text("All", fontSize = 11.sp) },
                                 modifier = Modifier.height(28.dp),
                                 colors = FilterChipDefaults.filterChipColors(

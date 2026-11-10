@@ -140,30 +140,16 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Route history filtered by the manager's chosen calendar date
-    val locationHistoryByDate: StateFlow<List<LocationPoint>> = kotlinx.coroutines.flow.combine(
-        _selectedTruckId,
-        _selectedDateMillis
-    ) { truckId, dateMillis ->
+    val locationHistoryByDate: StateFlow<List<LocationPoint>> = _selectedDateMillis.flatMapLatest { dateMillis ->
         val (startOfDay, endOfDay) = getDayRange(dateMillis)
-        if (truckId != null) {
-            dao.getLocationsForTruckBetween(truckId, startOfDay, endOfDay)
-        } else {
-            dao.getLocationsBetween(startOfDay, endOfDay)
-        }
-    }.flatMapLatest { it }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        dao.getLocationsBetween(startOfDay, endOfDay)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Stop records filtered by the manager's chosen calendar date
-    val stopsByDate: StateFlow<List<StopRecord>> = kotlinx.coroutines.flow.combine(
-        _selectedTruckId,
-        _selectedDateMillis
-    ) { truckId, dateMillis ->
+    val stopsByDate: StateFlow<List<StopRecord>> = _selectedDateMillis.flatMapLatest { dateMillis ->
         val (startOfDay, endOfDay) = getDayRange(dateMillis)
-        if (truckId != null) {
-            dao.getStopsForTruckBetween(truckId, startOfDay, endOfDay)
-        } else {
-            dao.getStopsBetween(startOfDay, endOfDay)
-        }
-    }.flatMapLatest { it }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        dao.getStopsBetween(startOfDay, endOfDay)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Voice delivery notes filtered by chosen calendar date
     val voiceNotesByDate: StateFlow<List<VoiceDeliveryNote>> = _selectedDateMillis.flatMapLatest { dateMillis ->
@@ -318,6 +304,8 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 isShiftActive = false,
                 statusText = "Off Duty"
             )
+            val subscriptionSaved = firestoreSync.recordTestTruckSubscription(nextId)
+            if (!subscriptionSaved) return@launch
             dao.insertTruck(newTruck)
             firestoreSync.syncTruck(newTruck)
             if (_selectedTruckId.value == null) {

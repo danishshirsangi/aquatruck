@@ -180,6 +180,7 @@ class FirestoreSyncManager(private val context: Context) {
             collection("voice_delivery_notes").document("voice_${note.truckId}_${note.timestamp}")
                 .set(data, SetOptions.merge())
                 .await()
+            true
         } catch (e: Exception) {
             Log.w("FirestoreSync", "Error syncing voice note: ${e.message}")
             false
