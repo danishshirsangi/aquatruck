@@ -106,22 +106,31 @@ class FirestoreSyncManager(private val context: Context) {
                 "assignedTruckId" to driver.assignedTruckId,
                 "createdAt" to driver.createdAt,
                 "uid" to (driver.userUid ?: ""),
-                "earlyLogoutEnabled" to driver.earlyLogoutEnabled
+                "earlyLogoutEnabled" to driver.earlyLogoutEnabled,
+                "invitationCode" to (driver.invitationCode ?: "")
             )
             collection("drivers").document("driver_${driver.id}")
                 .set(data, SetOptions.merge())
                 .await()
             val normalizedPhone = driver.phone.filter { it.isDigit() }
-            if (normalizedPhone.isNotBlank()) {
+            val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+                .getString("organization_id", null)
+            val inviteCode = driver.invitationCode
+            if (normalizedPhone.length >= 8 && !orgId.isNullOrBlank() && !inviteCode.isNullOrBlank()) {
                 val phoneHash = java.security.MessageDigest.getInstance("SHA-256")
                     .digest(normalizedPhone.toByteArray(Charsets.UTF_8))
                     .joinToString("") { "%02x".format(it) }
-                collection("driver_invitations").document(phoneHash).set(mapOf(
+                val businessName = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+                    .getString("business_name", "Business") ?: "Business"
+                firestore.collection("driver_invitations").document(inviteCode).set(mapOf(
+                    "organizationId" to orgId,
+                    "businessName" to businessName,
                     "driverId" to driver.id,
-                    "name" to driver.name,
-                    "phoneLastFour" to normalizedPhone.takeLast(4),
+                    "driverName" to driver.name,
+                    "phoneHash" to phoneHash,
                     "assignedTruckId" to driver.assignedTruckId,
-                    "active" to (driver.userUid.isNullOrBlank()),
+                    "active" to driver.userUid.isNullOrBlank(),
+                    "uid" to (driver.userUid ?: ""),
                     "createdAt" to driver.createdAt
                 ), SetOptions.merge()).await()
             }

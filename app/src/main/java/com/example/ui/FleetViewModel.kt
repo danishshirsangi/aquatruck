@@ -195,6 +195,8 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     val shiftPolicy: StateFlow<DriverShiftPolicy> = _shiftPolicy.asStateFlow()
     private val _earlyLogoutAllowed = MutableStateFlow(false)
     val earlyLogoutAllowed: StateFlow<Boolean> = _earlyLogoutAllowed.asStateFlow()
+    private val _assignedDriverTruckId = MutableStateFlow<Int?>(TenantManager.assignedTruckId(application))
+    val assignedDriverTruckId: StateFlow<Int?> = _assignedDriverTruckId.asStateFlow()
     private var shiftPolicyJob: Job? = null
     private var earlyLogoutJob: Job? = null
 
@@ -257,6 +259,15 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
         }
         earlyLogoutJob = viewModelScope.launch {
             TenantManager.observeOwnEarlyLogout(getApplication()).collect { _earlyLogoutAllowed.value = it }
+        }
+        viewModelScope.launch {
+            TenantManager.observeAssignedTruckId(getApplication()).collect { assigned ->
+                _assignedDriverTruckId.value = assigned
+                if (assigned != null && assigned > 0) {
+                    _selectedTruckId.value = assigned
+                    sessionPrefs.edit().putInt("assigned_truck_id", assigned).apply()
+                }
+            }
         }
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { TenantManager.refreshFleetCache(getApplication()) }

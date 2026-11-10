@@ -325,7 +325,7 @@ object TenantManager {
         driverDocs.forEach { doc ->
             val id = doc.getLong("id") ?: doc.id.removePrefix("driver_").toLongOrNull()
                 ?: doc.getString("uid")?.hashCode()?.toLong()?.let { kotlin.math.abs(it) } ?: return@forEach
-            dao.insertDriver(com.example.data.model.DriverEntity(
+            val hydratedDriver = com.example.data.model.DriverEntity(
                 id = id.coerceAtLeast(1L),
                 name = doc.getString("name") ?: "Driver",
                 phone = doc.getString("phone") ?: "",
@@ -334,12 +334,11 @@ object TenantManager {
                 userUid = doc.getString("uid")?.takeIf { it.isNotBlank() },
                 earlyLogoutEnabled = doc.getBoolean("earlyLogoutEnabled") ?: false,
                 invitationCode = doc.getString("invitationCode") ?: if (isManager) generateDriverInviteCode() else null
-            ).also { driver ->
-                dao.insertDriver(driver)
-                if (isManager && doc.getString("invitationCode").isNullOrBlank()) {
-                    com.example.data.firebase.FirestoreSyncManager(context).syncDriver(driver)
-                }
-            })
+            )
+            dao.insertDriver(hydratedDriver)
+            if (isManager && doc.getString("invitationCode").isNullOrBlank()) {
+                com.example.data.firebase.FirestoreSyncManager(context).syncDriver(hydratedDriver)
+            }
         }
 
         val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
@@ -472,6 +471,26 @@ object TenantManager {
                 mapOf("earlyLogoutEnabled" to enabled), com.google.firebase.firestore.SetOptions.merge())
         }
         batch.commit().await()
+    }
+
+    fun observeAssignedTruckId(context: Context): Flow<Int?> = callbackFlow {
+        val uid = Firebase.auth.currentUser?.uid
+        val orgId = organizationId(context)
+        if (uid.isNullOrBlank() || orgId.isNullOrBlank() || role(context) != "driver") {
+            trySend(assignedTruckId(context))
+            close()
+            return@callbackFlow
+        }
+        val listener = firestore(context).collection("organizations").document(orgId)
+            .collection("members").document(uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                trySend(snapshot?.getLong("assignedTruckId")?.toInt())
+            }
+        awaitClose { listener.remove() }
     }
 
     fun observeOwnEarlyLogout(context: Context): Flow<Boolean> = callbackFlow {

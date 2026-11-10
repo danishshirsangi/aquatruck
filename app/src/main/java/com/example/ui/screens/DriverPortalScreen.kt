@@ -53,6 +53,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,6 +87,7 @@ import com.example.ui.theme.StatusRedAlert
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @Composable
 fun DriverPortalScreen(
@@ -102,7 +105,7 @@ fun DriverPortalScreen(
     val selectedTruckStops by viewModel.selectedTruckStops.collectAsState()
     val shiftPolicy by viewModel.shiftPolicy.collectAsState()
     val earlyLogoutAllowed by viewModel.earlyLogoutAllowed.collectAsState()
-    val assignedTruckId = TenantManager.assignedTruckId(context)
+    val assignedTruckId by viewModel.assignedDriverTruckId.collectAsState()
     val isDriverAccount = TenantManager.role(context) == "driver"
     val visibleTrucks = if (isDriverAccount && assignedTruckId != null) trucks.filter { it.id == assignedTruckId } else if (isDriverAccount) emptyList() else trucks
     val currentUid = TenantManager.currentUserUid()
@@ -130,8 +133,17 @@ fun DriverPortalScreen(
     // Session lock & shift active status: persists across app closes
     val isShiftActive = (loggedInTruckId != null && effectiveTruck?.isShiftActive == true)
 
-    // Time unlocks the logout button only. The shift continues until the driver manually logs out.
-    val currentCalendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone(shiftPolicy.timezone))
+    // The button gate refreshes independently from GPS callbacks; time unlock never ends the shift.
+    var clockNowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            clockNowMillis = System.currentTimeMillis()
+            delay(15_000L)
+        }
+    }
+    val currentCalendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone(shiftPolicy.timezone)).apply {
+        timeInMillis = clockNowMillis
+    }
     val currentMinutes = currentCalendar.get(java.util.Calendar.HOUR_OF_DAY) * 60 +
         currentCalendar.get(java.util.Calendar.MINUTE)
     val isLogoutAllowed = earlyLogoutAllowed || currentMinutes >= shiftPolicy.logoutTimeMinutes

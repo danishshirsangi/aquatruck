@@ -29,7 +29,8 @@ service cloud.firestore {
     match /driver_invitations/{inviteCode} {
       allow get: if signedIn();
       allow list: if false;
-      allow create, delete: if signedIn() && isManager(request.resource.data.organizationId);
+      allow create: if signedIn() && isManager(request.resource.data.organizationId);
+      allow delete: if signedIn() && isManager(resource.data.organizationId);
       allow update: if signedIn() && (
         isManager(resource.data.organizationId)
         || (
@@ -85,7 +86,7 @@ service cloud.firestore {
       }
 
       match /trucks/{truckId} {
-        allow read: if isMember(orgId);
+        allow read: if isManager(orgId) || (isDriver(orgId) && resource.data.id == assignedTruckId(orgId));
         allow create, delete: if isManager(orgId);
         allow update: if isManager(orgId) || (
           isDriver(orgId)
