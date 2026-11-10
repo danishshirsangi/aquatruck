@@ -627,8 +627,16 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 locationLabel = locationLabel,
                 timestamp = now
             )
-            dao.insertVoiceNote(note)
-            LocationSyncScheduler.enqueue(context)
+            val savedNoteId = dao.insertVoiceNote(note)
+            val savedNote = note.copy(id = savedNoteId)
+
+            // Upload the recording immediately while its local file is guaranteed to exist.
+            // WorkManager remains the offline/retry fallback.
+            if (firestoreSync.syncVoiceNote(savedNote)) {
+                dao.markVoiceNotesSynced(listOf(savedNoteId))
+            } else {
+                LocationSyncScheduler.enqueue(context)
+            }
 
             // Save Stop Record
             val stop = StopRecord(
