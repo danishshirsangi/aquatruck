@@ -376,7 +376,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
         if (TenantManager.role(getApplication()) != "manager" || !_isManagerUnlocked.value) return
         viewModelScope.launch(Dispatchers.IO) {
             val driver = allDrivers.value.firstOrNull { it.id == driverId } ?: return@launch
-            firestoreSync.deleteDriver(driver)
+            if (!firestoreSync.deleteDriver(driver)) return@launch
             dao.deleteDriver(driverId)
         }
     }
