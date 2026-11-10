@@ -28,7 +28,8 @@ data class DriverEntity(
     val assignedTruckId: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
     val userUid: String? = null,
-    val earlyLogoutEnabled: Boolean = false
+    val earlyLogoutEnabled: Boolean = false,
+    val invitationCode: String? = null
 )
 
 @Entity(tableName = "attendance")

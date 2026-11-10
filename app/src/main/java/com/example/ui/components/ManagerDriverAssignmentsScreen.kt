@@ -70,6 +70,9 @@ fun ManagerDriverAssignmentsScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
+                    driver.invitationCode?.let { code ->
+                        Text("One-time driver code: $code", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    }
                     Button(
                         onClick = { expandedDriverId = driver.id },
                         modifier = Modifier.fillMaxWidth(),

@@ -97,7 +97,7 @@ fun BusinessOnboardingScreen(onComplete: () -> Unit) {
                         OutlinedTextField(confirmPin, { confirmPin = it.filter(Char::isDigit).take(8) }, label = { Text("Confirm PIN") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), singleLine = true)
                     } else {
                         Text("Join an existing business", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        OutlinedTextField(inviteCode, { inviteCode = it.uppercase().take(12) }, label = { Text("Business invitation code *") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        OutlinedTextField(inviteCode, { inviteCode = it.uppercase().take(12) }, label = { Text("One-time driver invitation code *") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                         OutlinedTextField(driverName, { driverName = it }, label = { Text("Your full name *") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                         OutlinedTextField(driverPhone, { driverPhone = it }, label = { Text("Phone number") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                         Text("Only join using a code shared by your fleet manager. The code links this Google account to that business.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
@@ -106,9 +106,9 @@ fun BusinessOnboardingScreen(onComplete: () -> Unit) {
                     if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     if (generatedCode != null) {
                         Text("Business created successfully.", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("Share this driver invitation code:")
-                        Text(generatedCode!!, style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
-                        Text("Drivers who enter this code will be linked to your business.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Business created. Add driver profiles from Fleet Overview and share their individual codes from Drivers & Assignments.")
+                        Text("Business reference: " + generatedCode!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Ask your manager for your individual one-time invitation code and use the phone number registered for you.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
 
                     Button(

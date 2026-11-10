@@ -354,7 +354,8 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             val driver = DriverEntity(
                 name = name,
                 phone = phone,
-                assignedTruckId = _selectedTruckId.value ?: allTrucks.value.firstOrNull()?.id ?: 0
+                assignedTruckId = _selectedTruckId.value ?: allTrucks.value.firstOrNull()?.id ?: 0,
+                invitationCode = TenantManager.generateDriverInviteCode()
             )
             val id = dao.insertDriver(driver)
             firestoreSync.syncDriver(driver.copy(id = id))
