@@ -338,6 +338,7 @@ private fun FleetOverviewTab(
     onEndShift: (Int) -> Unit = {},
     onResetAllClicked: () -> Unit = {}
 ) {
+    val clipboard = LocalClipboardManager.current
     val activeTrucksCount = trucks.count { it.isShiftActive }
 
     LazyColumn(
