@@ -49,6 +49,8 @@ object TenantManager {
     fun assignedTruckId(context: Context): Int? =
         prefs(context).getInt(KEY_ASSIGNED_TRUCK_ID, 0).takeIf { it > 0 }
 
+    fun currentUserUid(): String? = Firebase.auth.currentUser?.uid
+
     fun hasActiveOrganization(context: Context): Boolean =
         !organizationId(context).isNullOrBlank() && !role(context).isNullOrBlank()
 
@@ -220,6 +222,7 @@ object TenantManager {
         ))
         batch.set(orgRef.collection("members").document(user.uid), mapOf(
             "uid" to user.uid,
+            "driverId" to driverId,
             "role" to "driver",
             "name" to (invitation.getString("name") ?: driverName.trim()),
             "phone" to phone.trim(),
@@ -276,7 +279,7 @@ object TenantManager {
                 phone = doc.getString("phone") ?: "",
                 assignedTruckId = (doc.getLong("assignedTruckId") ?: 0L).toInt(),
                 createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis(),
-                userUid = doc.getString("uid"),
+                userUid = doc.getString("uid")?.takeIf { it.isNotBlank() },
                 earlyLogoutEnabled = doc.getBoolean("earlyLogoutEnabled") ?: false
             ))
         }
@@ -296,6 +299,15 @@ object TenantManager {
         driver.userUid?.let { uid ->
             batch.set(root.collection("members").document(uid), mapOf("assignedTruckId" to truckId),
                 com.google.firebase.firestore.SetOptions.merge())
+        }
+        val normalizedPhone = driver.phone.filter { it.isDigit() }
+        if (normalizedPhone.length >= 8) {
+            batch.set(root.collection("driver_invitations").document(hashPhone(driver.phone)),
+                mapOf(
+                    "driverId" to driver.id,
+                    "assignedTruckId" to truckId,
+                    "active" to driver.userUid.isNullOrBlank()
+                ), com.google.firebase.firestore.SetOptions.merge())
         }
         batch.commit().await()
     }

@@ -193,7 +193,10 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _shiftPolicy = MutableStateFlow(DriverShiftPolicy())
     val shiftPolicy: StateFlow<DriverShiftPolicy> = _shiftPolicy.asStateFlow()
+    private val _earlyLogoutAllowed = MutableStateFlow(false)
+    val earlyLogoutAllowed: StateFlow<Boolean> = _earlyLogoutAllowed.asStateFlow()
     private var shiftPolicyJob: Job? = null
+    private var earlyLogoutJob: Job? = null
 
     private val _currentRole = MutableStateFlow(UserRole.DRIVER)
     val currentRole: StateFlow<UserRole> = _currentRole.asStateFlow()
@@ -248,8 +251,12 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshTenantContext() {
         shiftPolicyJob?.cancel()
+        earlyLogoutJob?.cancel()
         shiftPolicyJob = viewModelScope.launch {
             TenantManager.observeShiftPolicy(getApplication()).collect { _shiftPolicy.value = it }
+        }
+        earlyLogoutJob = viewModelScope.launch {
+            TenantManager.observeOwnEarlyLogout(getApplication()).collect { _earlyLogoutAllowed.value = it }
         }
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { TenantManager.refreshFleetCache(getApplication()) }
@@ -259,6 +266,24 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     fun saveShiftPolicy(policy: DriverShiftPolicy) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { TenantManager.saveShiftPolicy(getApplication(), policy) }
+        }
+    }
+
+    fun assignDriverToTruck(driverId: Long, truckId: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val driver = allDrivers.value.firstOrNull { it.id == driverId } ?: return@launch
+            val updated = driver.copy(assignedTruckId = truckId)
+            runCatching { TenantManager.assignDriverToTruck(getApplication(), updated, truckId) }
+                .onSuccess { dao.insertDriver(updated) }
+        }
+    }
+
+    fun setDriverEarlyLogout(driverId: Long, enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val driver = allDrivers.value.firstOrNull { it.id == driverId } ?: return@launch
+            val updated = driver.copy(earlyLogoutEnabled = enabled)
+            runCatching { TenantManager.setDriverEarlyLogout(getApplication(), updated, enabled) }
+                .onSuccess { dao.insertDriver(updated) }
         }
     }
 
@@ -329,7 +354,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             val driver = DriverEntity(
                 name = name,
                 phone = phone,
-                assignedTruckId = _selectedTruckId.value ?: 1
+                assignedTruckId = _selectedTruckId.value ?: allTrucks.value.firstOrNull()?.id ?: 0
             )
             val id = dao.insertDriver(driver)
             firestoreSync.syncDriver(driver.copy(id = id))
