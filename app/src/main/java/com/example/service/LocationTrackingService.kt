@@ -20,6 +20,7 @@ import com.example.data.db.AppDatabase
 import com.example.data.model.LocationPoint
 import com.example.data.model.StopRecord
 import com.example.util.LocationUtils
+import com.example.data.sync.LocationSyncScheduler
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -29,7 +30,6 @@ import com.google.android.gms.location.Priority
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.atan2
@@ -47,8 +47,11 @@ class LocationTrackingService : Service() {
     private var activeTruckId: Int = 1
     private var activeTruckName: String = "Water Tanker"
 
-    // Last recorded location state
-    private var lastLocationTime: Long = 0L
+    private var currentIntervalMillis = MOVING_INTERVAL_MS
+    private var previousLocation: Location? = null
+    private var stationarySamples = 0
+    private var lastNotificationStatus: String? = null
+    private var lastTruckSyncAt: Long = 0L
 
     // Automatic Drop Point Detection (Still or within 100 meters for 2 minutes / 120s)
     private var anchorLat: Double = 0.0
@@ -59,6 +62,11 @@ class LocationTrackingService : Service() {
     companion object {
         const val CHANNEL_ID = "aquatrack_fleet_tracking"
         const val NOTIFICATION_ID = 1001
+        private const val MOVING_INTERVAL_MS = 20_000L
+        private const val STATIONARY_INTERVAL_MS = 3 * 60_000L
+        private const val MOVEMENT_DISTANCE_METERS = 25f
+        private const val STATIONARY_SPEED_KMH = 2.5f
+        private const val STATIONARY_SAMPLES_REQUIRED = 3
 
         const val ACTION_START_TRACKING = "com.example.aquatrack.START_TRACKING"
         const val ACTION_STOP_TRACKING = "com.example.aquatrack.STOP_TRACKING"
@@ -97,7 +105,7 @@ class LocationTrackingService : Service() {
             ACTION_START_TRACKING -> {
                 activeTruckId = intent.getIntExtra(EXTRA_TRUCK_ID, 1)
                 activeTruckName = intent.getStringExtra(EXTRA_TRUCK_NAME) ?: "Water Tanker $activeTruckId"
-                startForeground(NOTIFICATION_ID, buildNotification("Shift Active: $activeTruckName", "Live GPS tracking every 10s"))
+                startForeground(NOTIFICATION_ID, buildNotification("Shift Active: $activeTruckName", "Live GPS tracking • adaptive 20s / 3m"))
                 startTrackingLoop()
             }
             ACTION_STOP_TRACKING -> {
@@ -112,73 +120,83 @@ class LocationTrackingService : Service() {
     @SuppressLint("MissingPermission")
     private fun startTrackingLoop() {
         trackingJob?.cancel()
+        previousLocation = null
+        stationarySamples = 0
+        currentIntervalMillis = MOVING_INTERVAL_MS
 
-        // 1. Hardware GPS updates configured for 10-second interval
-        try {
-            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000L)
-                .setMinUpdateIntervalMillis(10000L)
-                .setMaxUpdateDelayMillis(12000L)
-                .setMinUpdateDistanceMeters(0f) // Keep logging breadcrumb every 10s even when still
-                .build()
-
-            locationCallback = object : LocationCallback() {
-                override fun onLocationResult(result: LocationResult) {
-                    val location = result.lastLocation ?: return
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                result.locations.forEach { location ->
                     if (location.latitude != 0.0 || location.longitude != 0.0) {
-                        handleNewLocation(location.latitude, location.longitude, location.speed * 3.6f)
+                        updateTrackingMode(location)
+                        handleNewLocation(location)
                     }
                 }
             }
+        }
+        requestLocationUpdates(currentIntervalMillis)
+    }
 
-            fusedLocationClient.requestLocationUpdates(
-                locationRequest,
-                locationCallback!!,
-                Looper.getMainLooper()
-            )
+    @SuppressLint("MissingPermission")
+    private fun requestLocationUpdates(intervalMillis: Long) {
+        val callback = locationCallback ?: return
+        try {
+            fusedLocationClient.removeLocationUpdates(callback)
+            val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, intervalMillis)
+                .setMinUpdateIntervalMillis(intervalMillis)
+                .setMinUpdateDistanceMeters(if (intervalMillis == MOVING_INTERVAL_MS) 10f else 0f)
+                .build()
+            fusedLocationClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
+            currentIntervalMillis = intervalMillis
+            Log.i("LocationTrackingService", "Location interval set to $intervalMillis ms")
         } catch (e: SecurityException) {
             Log.w("LocationTrackingService", "Missing location permissions: ${e.message}")
         }
-
-        // 2. Watchdog coroutine: guarantees tracking point every 10 seconds even if hardware callback stalls
-        trackingJob = serviceScope.launch {
-            anchorStartTime = System.currentTimeMillis()
-
-            while (isActive) {
-                delay(10000L) // 10-second tracking interval
-
-                val now = System.currentTimeMillis()
-                // If callback hasn't triggered in the last 9.5 seconds, actively poll current location
-                if (now - lastLocationTime >= 9500L) {
-                    val location = LocationUtils.getCurrentLocation(applicationContext)
-                    if (location != null && (location.latitude != 0.0 || location.longitude != 0.0)) {
-                        handleNewLocation(location.latitude, location.longitude, location.speed * 3.6f)
-                    }
-                }
-            }
-        }
     }
 
-    private fun handleNewLocation(lat: Double, lng: Double, speedKmh: Float, customStatus: String? = null) {
-        val now = System.currentTimeMillis()
-        lastLocationTime = now
+    private fun updateTrackingMode(location: Location) {
+        val previous = previousLocation
+        val movedMeters = if (previous == null) Float.MAX_VALUE else previous.distanceTo(location)
+        val isMoving = location.speed * 3.6f > STATIONARY_SPEED_KMH ||
+            movedMeters >= MOVEMENT_DISTANCE_METERS
+
+        if (isMoving) {
+            stationarySamples = 0
+            if (currentIntervalMillis != MOVING_INTERVAL_MS) {
+                requestLocationUpdates(MOVING_INTERVAL_MS)
+            }
+        } else {
+            stationarySamples++
+            if (stationarySamples >= STATIONARY_SAMPLES_REQUIRED &&
+                currentIntervalMillis != STATIONARY_INTERVAL_MS
+            ) {
+                requestLocationUpdates(STATIONARY_INTERVAL_MS)
+            }
+        }
+        previousLocation = Location(location)
+    }
+
+    private fun handleNewLocation(location: Location, customStatus: String? = null) {
+        val lat = location.latitude
+        val lng = location.longitude
+        val speedKmh = location.speed * 3.6f
+        val now = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
 
         serviceScope.launch {
             val dao = AppDatabase.getDatabase(applicationContext).fleetDao()
-            val firestoreSync = com.example.data.firebase.FirestoreSyncManager(applicationContext)
-
-            // 1. Insert Location Point breadcrumb for continuous route trail line every 10s
             val point = LocationPoint(
                 truckId = activeTruckId,
                 latitude = lat,
                 longitude = lng,
                 speedKmh = speedKmh,
-                accuracyMeters = 3f,
+                accuracyMeters = location.accuracy,
                 timestamp = now
             )
-            val pointId = dao.insertLocationPoint(point)
-            firestoreSync.syncLocationPoint(point.copy(id = pointId))
+            dao.insertLocationPoint(point)
 
-            // 2. Automatic Drop Point Detection (Still or within 100 meters for 2 minutes / 120,000 ms)
+            // Persist first; the independent worker uploads pending points when connected.
+            LocationSyncScheduler.enqueue(applicationContext)
+
             if (anchorLat == 0.0 && anchorLng == 0.0) {
                 anchorLat = lat
                 anchorLng = lng
@@ -188,10 +206,8 @@ class LocationTrackingService : Service() {
 
             val distFromAnchor = calculateDistanceMeters(anchorLat, anchorLng, lat, lng)
             if (distFromAnchor <= 100.0) {
-                // Vehicle is stationary or within 100-meter radius
                 val durationAtAnchor = now - anchorStartTime
                 if (durationAtAnchor >= 120000L && !hasLoggedCurrentDropPoint) {
-                    // Vehicle stayed within 100 meters for 2 minutes -> Record as Auto Drop Point!
                     hasLoggedCurrentDropPoint = true
                     val durationMin = (durationAtAnchor / 60000L).toInt().coerceAtLeast(2)
                     val label = LocationUtils.getAddressLabel(applicationContext, lat, lng)
@@ -206,18 +222,18 @@ class LocationTrackingService : Service() {
                         category = "Auto Drop Point"
                     )
                     val stopId = dao.insertStop(dropPoint)
-                    firestoreSync.syncStop(dropPoint.copy(id = stopId))
+                    com.example.data.firebase.FirestoreSyncManager(applicationContext)
+                        .syncStop(dropPoint.copy(id = stopId))
                 }
             } else {
-                // Vehicle moved outside 100 meters: reset anchor for the next potential drop point
                 anchorLat = lat
                 anchorLng = lng
                 anchorStartTime = now
                 hasLoggedCurrentDropPoint = false
             }
 
-            // 3. Update TruckEntity state with live coordinates
-            val status = customStatus ?: if (speedKmh > 2.5f) "En Route (${speedKmh.toInt()} km/h)" else "At Stop / Drop Point"
+            val status = customStatus ?: if (speedKmh > STATIONARY_SPEED_KMH)
+                "En Route (${speedKmh.toInt()} km/h)" else "At Stop / Drop Point"
             dao.updateTruckLocation(
                 truckId = activeTruckId,
                 lat = lat,
@@ -226,18 +242,26 @@ class LocationTrackingService : Service() {
                 status = status,
                 timestamp = now
             )
-            val truck = dao.getTruckByIdDirect(activeTruckId)
-            if (truck != null) {
-                firestoreSync.syncTruck(truck)
+
+            // Sync the live truck document at most once per minute. Breadcrumbs use the batch queue.
+            if (now - lastTruckSyncAt >= 60_000L) {
+                dao.getTruckByIdDirect(activeTruckId)?.let { truck ->
+                    com.example.data.firebase.FirestoreSyncManager(applicationContext).syncTruck(truck)
+                }
+                lastTruckSyncAt = now
             }
 
-            // 4. Update notification with 10-second telemetry
-            val notification = buildNotification(
-                title = "AquaTrack: $activeTruckName",
-                content = if (speedKmh > 2f) "En Route (${speedKmh.toInt()} km/h) • Tracking Every 10s" else "At Stop / Drop Point • Tracking Every 10s"
-            )
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.notify(NOTIFICATION_ID, notification)
+            // Keep the live document lightweight; historical breadcrumbs are batch-synced separately.
+            val notificationStatus = if (speedKmh > STATIONARY_SPEED_KMH) "En Route" else "At Stop / Drop Point"
+            if (notificationStatus != lastNotificationStatus) {
+                lastNotificationStatus = notificationStatus
+                val notification = buildNotification(
+                    title = "AquaTrack: $activeTruckName",
+                    content = "$notificationStatus • Adaptive GPS"
+                )
+                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                manager.notify(NOTIFICATION_ID, notification)
+            }
         }
     }
 
@@ -271,7 +295,7 @@ class LocationTrackingService : Service() {
                 "AquaTrack Fleet Tracking",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Notifies that truck GPS tracking is actively running in background every 10 seconds"
+                description = "Notifies that truck GPS tracking is actively running in the background"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
