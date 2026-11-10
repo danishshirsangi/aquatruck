@@ -65,19 +65,19 @@ jobs:
           print("Firebase config restored and Android package name validated.")
           PY
 
-      # The project build.gradle.kts explicitly references this local debug keystore.
-      # Generate it on the ephemeral GitHub runner; do not commit it to the repository.
-      - name: Generate temporary debug keystore
+      # Use one persistent signing key so Google Sign-In SHA-1 stays stable across builds.
+      # Store the base64-encoded keystore as the repository secret DEBUG_KEYSTORE_BASE64.
+      - name: Restore persistent debug keystore
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
-          keytool -genkeypair -v \
-            -keystore debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          if [ -z "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "::error::Missing repository secret DEBUG_KEYSTORE_BASE64. Add the base64-encoded AquaTrack debug keystore in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 --decode > debug.keystore
+          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v6
