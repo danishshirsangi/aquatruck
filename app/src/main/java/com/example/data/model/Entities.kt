@@ -46,7 +46,8 @@ data class AttendanceRecord(
     tableName = "location_points",
     indices = [
         Index(value = ["isSynced", "timestamp"]),
-        Index(value = ["truckId", "timestamp"])
+        Index(value = ["truckId", "timestamp"]),
+        Index(value = ["timestamp"])
     ]
 )
 data class LocationPoint(
@@ -65,7 +66,8 @@ data class LocationPoint(
     tableName = "stop_records",
     indices = [
         Index(value = ["isSynced", "startTime"]),
-        Index(value = ["truckId", "startTime"])
+        Index(value = ["truckId", "startTime"]),
+        Index(value = ["startTime"])
     ]
 )
 data class StopRecord(
