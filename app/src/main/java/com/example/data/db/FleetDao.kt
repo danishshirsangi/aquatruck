@@ -110,6 +110,19 @@ interface FleetDao {
     @Query("DELETE FROM location_points WHERE isSynced = 1 AND timestamp < :cutoffTimestamp")
     suspend fun deleteSyncedLocationPointsBefore(cutoffTimestamp: Long): Int
 
+    // Pending stop records are retained locally until Firestore confirms the batch commit.
+    @Query("SELECT * FROM stop_records WHERE isSynced = 0 ORDER BY startTime ASC LIMIT 200")
+    suspend fun getPendingStopRecords(): List<StopRecord>
+
+    @Query("UPDATE stop_records SET isSynced = 1, retryCount = 0 WHERE id IN (:ids)")
+    suspend fun markStopRecordsSynced(ids: List<Long>)
+
+    @Query("UPDATE stop_records SET retryCount = retryCount + 1 WHERE id IN (:ids)")
+    suspend fun incrementStopRetryCount(ids: List<Long>)
+
+    @Query("SELECT COUNT(*) FROM stop_records WHERE isSynced = 0")
+    suspend fun getPendingStopCount(): Int
+
     // Stop Records
     @Query("SELECT * FROM stop_records WHERE truckId = :truckId ORDER BY startTime DESC")
     fun getStopsForTruck(truckId: Int): Flow<List<StopRecord>>
