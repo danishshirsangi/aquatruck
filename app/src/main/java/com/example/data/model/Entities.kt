@@ -1,6 +1,8 @@
 package com.example.data.model
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "trucks")
@@ -40,7 +42,14 @@ data class AttendanceRecord(
     val isCompleted: Boolean = false
 )
 
-@Entity(tableName = "location_points")
+@Entity(
+    tableName = "location_points",
+    indices = [
+        Index(value = ["isSynced", "timestamp"]),
+        Index(value = ["truckId", "timestamp"]),
+        Index(value = ["timestamp"])
+    ]
+)
 data class LocationPoint(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val truckId: Int,
@@ -48,10 +57,19 @@ data class LocationPoint(
     val longitude: Double,
     val speedKmh: Float,
     val accuracyMeters: Float = 5f,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val retryCount: Int = 0
 )
 
-@Entity(tableName = "stop_records")
+@Entity(
+    tableName = "stop_records",
+    indices = [
+        Index(value = ["isSynced", "startTime"]),
+        Index(value = ["truckId", "startTime"]),
+        Index(value = ["startTime"])
+    ]
+)
 data class StopRecord(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val truckId: Int,
@@ -61,7 +79,9 @@ data class StopRecord(
     val endTime: Long,
     val durationMinutes: Int,
     val addressOrLabel: String,
-    val category: String = "Delivery Stop"
+    val category: String = "Delivery Stop",
+    @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val retryCount: Int = 0
 )
 
 @Entity(tableName = "voice_delivery_notes")

@@ -149,9 +149,45 @@ class FirestoreSyncManager(private val context: Context) {
         }
     }
 
-    suspend fun syncStop(stop: StopRecord) {
-        if (auth.currentUser == null) return
-        try {
+    /**
+     * Uploads historical breadcrumbs in Firestore batches. A false result means none of
+     * the supplied points should be marked synced by the caller.
+     */
+    suspend fun syncLocationBatch(points: List<LocationPoint>): Boolean {
+        if (points.isEmpty()) return true
+        if (auth.currentUser == null) return false
+        return try {
+            points.chunked(450).forEach { chunk ->
+                val batch = firestore.batch()
+                chunk.forEach { point ->
+                    val data = hashMapOf(
+                        "id" to point.id,
+                        "truckId" to point.truckId,
+                        "latitude" to point.latitude,
+                        "longitude" to point.longitude,
+                        "speedKmh" to point.speedKmh,
+                        "accuracyMeters" to point.accuracyMeters,
+                        "timestamp" to point.timestamp
+                    )
+                    batch.set(
+                        firestore.collection("location_points")
+                            .document("loc_${point.truckId}_${point.timestamp}"),
+                        data,
+                        SetOptions.merge()
+                    )
+                }
+                batch.commit().await()
+            }
+            true
+        } catch (e: Exception) {
+            Log.w("FirestoreSync", "Location batch upload failed: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun syncStop(stop: StopRecord): Boolean {
+        if (auth.currentUser == null) return false
+        return try {
             val data = hashMapOf(
                 "id" to stop.id,
                 "truckId" to stop.truckId,
@@ -166,8 +202,47 @@ class FirestoreSyncManager(private val context: Context) {
             firestore.collection("stop_records").document("stop_${stop.id}")
                 .set(data, SetOptions.merge())
                 .await()
+            true
         } catch (e: Exception) {
-            Log.w("FirestoreSync", "Error syncing stop: ${e.message}")
+            Log.w("FirestoreSync", "Error syncing stop: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Uploads pending stop records in one Firestore batch per chunk.
+     * The caller marks records synced only after this returns true.
+     */
+    suspend fun syncStopBatch(stops: List<StopRecord>): Boolean {
+        if (stops.isEmpty()) return true
+        if (auth.currentUser == null) return false
+        return try {
+            stops.chunked(450).forEach { chunk ->
+                val batch = firestore.batch()
+                chunk.forEach { stop ->
+                    val data = hashMapOf(
+                        "id" to stop.id,
+                        "truckId" to stop.truckId,
+                        "latitude" to stop.latitude,
+                        "longitude" to stop.longitude,
+                        "startTime" to stop.startTime,
+                        "endTime" to stop.endTime,
+                        "durationMinutes" to stop.durationMinutes,
+                        "addressOrLabel" to stop.addressOrLabel,
+                        "category" to stop.category
+                    )
+                    batch.set(
+                        firestore.collection("stop_records").document("stop_${stop.id}"),
+                        data,
+                        SetOptions.merge()
+                    )
+                }
+                batch.commit().await()
+            }
+            true
+        } catch (e: Exception) {
+            Log.w("FirestoreSync", "Stop batch upload failed: ${e.message}", e)
+            false
         }
     }
 

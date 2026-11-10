@@ -98,7 +98,6 @@ fun DriverPortalScreen(
     val loggedInDriverName by viewModel.loggedInDriverName.collectAsState()
     val selectedTruck by viewModel.selectedTruck.collectAsState()
     val activeAttendance by viewModel.activeAttendance.collectAsState()
-    val selectedTruckLocations by viewModel.selectedTruckLocations.collectAsState()
     val selectedTruckStops by viewModel.selectedTruckStops.collectAsState()
 
     // Driver identity selection state

@@ -97,7 +97,6 @@ fun ManagerPortalScreen(
     val context = LocalContext.current
     val trucks by viewModel.allTrucks.collectAsState()
     val drivers by viewModel.allDrivers.collectAsState()
-    val allLocations by viewModel.allRecentLocations.collectAsState()
     val allStops by viewModel.allStops.collectAsState()
     val allAttendance by viewModel.allAttendanceHistory.collectAsState()
     val allVoiceNotes by viewModel.allVoiceNotes.collectAsState()
@@ -207,16 +206,8 @@ fun ManagerPortalScreen(
             3 -> StopsAndTripLogsTab(
                 trucks = trucks,
                 stops = allStops,
-                voiceNotes = allVoiceNotes,
                 selectedTruckFilter = filterTruckId,
-                onFilterChanged = { filterTruckId = it },
-                onPlayVoiceNote = { viewModel.playVoiceNote(it) },
-                isPlaying = isPlaying,
-                currentlyPlayingPath = playingPath,
-                onSelectStopOnMap = { stop ->
-                    filterTruckId = stop.truckId
-                    selectedTabIndex = 1
-                }
+                onFilterChanged = { filterTruckId = it }
             )
             4 -> DriverAttendanceTab(
                 attendanceList = allAttendance,

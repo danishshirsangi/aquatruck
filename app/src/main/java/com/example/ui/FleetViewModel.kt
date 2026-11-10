@@ -13,6 +13,7 @@ import com.example.data.model.LocationPoint
 import com.example.data.model.StopRecord
 import com.example.data.model.TruckEntity
 import com.example.data.model.VoiceDeliveryNote
+import com.example.data.sync.LocationSyncScheduler
 import com.example.service.LocationTrackingService
 import com.example.util.AudioPlayerManager
 import com.example.util.AudioRecorderManager
@@ -82,13 +83,6 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val allAttendanceHistory: StateFlow<List<AttendanceRecord>> = dao.getAllAttendance()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val selectedTruckLocations: StateFlow<List<LocationPoint>> = _selectedTruckId.flatMapLatest { id ->
-        if (id != null) dao.getLocationsForTruck(id) else kotlinx.coroutines.flow.flowOf(emptyList())
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val allRecentLocations: StateFlow<List<LocationPoint>> = dao.getAllRecentLocations()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Dark Theme Mode (null = follow system, true = force dark, false = force light)
@@ -395,11 +389,11 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                     accuracyMeters = loc?.accuracy ?: 3f,
                     timestamp = now
                 )
-                val ptId = dao.insertLocationPoint(pt)
-                firestoreSync.syncLocationPoint(pt.copy(id = ptId))
+                dao.insertLocationPoint(pt)
+                LocationSyncScheduler.enqueue(context)
             }
 
-            // 5. Start Foreground Service for continuous 10s background tracking
+            // 5. Start adaptive foreground GPS tracking
             LocationTrackingService.startService(context, truckId, truck.name)
         }
     }
@@ -492,8 +486,8 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                     accuracyMeters = freshLocation?.accuracy ?: 3f,
                     timestamp = now
                 )
-                val ptId = dao.insertLocationPoint(point)
-                firestoreSync.syncLocationPoint(point.copy(id = ptId))
+                dao.insertLocationPoint(point)
+                LocationSyncScheduler.enqueue(context)
             }
 
             // Save Voice Delivery Note with exact GPS coordinates and address
@@ -522,7 +516,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 category = "Delivery Stop"
             )
             val stopId = dao.insertStop(stop)
-            firestoreSync.syncStop(stop.copy(id = stopId))
+            LocationSyncScheduler.enqueue(context)
         }
     }
 
@@ -582,7 +576,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                             timestamp = System.currentTimeMillis()
                         )
                         dao.insertLocationPoint(point)
-                        firestoreSync.syncLocationPoint(point)
+                        LocationSyncScheduler.enqueue(getApplication<Application>())
                     }
                 }
             }

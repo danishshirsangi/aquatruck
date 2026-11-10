@@ -71,9 +71,6 @@ interface FleetDao {
     suspend fun updateAttendance(record: AttendanceRecord)
 
     // Location Points
-    @Query("SELECT * FROM location_points WHERE truckId = :truckId ORDER BY timestamp ASC")
-    fun getLocationsForTruck(truckId: Int): Flow<List<LocationPoint>>
-
     @Query("SELECT * FROM location_points WHERE truckId = :truckId AND timestamp >= :sinceTimestamp ORDER BY timestamp ASC")
     fun getLocationsForTruckSince(truckId: Int, sinceTimestamp: Long): Flow<List<LocationPoint>>
 
@@ -89,11 +86,36 @@ interface FleetDao {
     @Query("SELECT * FROM location_points WHERE truckId = :truckId ORDER BY timestamp DESC LIMIT 100")
     suspend fun getRecentLocationsDirect(truckId: Int): List<LocationPoint>
 
-    @Query("SELECT * FROM location_points ORDER BY timestamp ASC")
-    fun getAllRecentLocations(): Flow<List<LocationPoint>>
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLocationPoint(point: LocationPoint): Long
+
+    @Query("SELECT * FROM location_points WHERE isSynced = 0 ORDER BY timestamp ASC LIMIT 200")
+    suspend fun getPendingLocationPoints(): List<LocationPoint>
+
+    @Query("UPDATE location_points SET isSynced = 1, retryCount = 0 WHERE id IN (:ids)")
+    suspend fun markLocationPointsSynced(ids: List<Long>)
+
+    @Query("UPDATE location_points SET retryCount = retryCount + 1 WHERE id IN (:ids)")
+    suspend fun incrementLocationRetryCount(ids: List<Long>)
+
+    @Query("SELECT COUNT(*) FROM location_points WHERE isSynced = 0")
+    suspend fun getPendingLocationCount(): Int
+
+    @Query("DELETE FROM location_points WHERE isSynced = 1 AND timestamp < :cutoffTimestamp")
+    suspend fun deleteSyncedLocationPointsBefore(cutoffTimestamp: Long): Int
+
+    // Pending stop records are retained locally until Firestore confirms the batch commit.
+    @Query("SELECT * FROM stop_records WHERE isSynced = 0 ORDER BY startTime ASC LIMIT 200")
+    suspend fun getPendingStopRecords(): List<StopRecord>
+
+    @Query("UPDATE stop_records SET isSynced = 1, retryCount = 0 WHERE id IN (:ids)")
+    suspend fun markStopRecordsSynced(ids: List<Long>)
+
+    @Query("UPDATE stop_records SET retryCount = retryCount + 1 WHERE id IN (:ids)")
+    suspend fun incrementStopRetryCount(ids: List<Long>)
+
+    @Query("SELECT COUNT(*) FROM stop_records WHERE isSynced = 0")
+    suspend fun getPendingStopCount(): Int
 
     // Stop Records
     @Query("SELECT * FROM stop_records WHERE truckId = :truckId ORDER BY startTime DESC")
