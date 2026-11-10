@@ -1,10 +1,11 @@
 package com.example.data.firebase
 
 import android.content.Context
-import android.util.Log
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -54,10 +55,12 @@ object SupabaseAudioStorage {
             .header("Authorization", "Bearer $token")
             .post(body)
             .build()
-        client.newCall(request).execute().use { response ->
-            val responseText = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw IllegalStateException(errorMessage(responseText, response.code))
-            return "$BUCKET_PREFIX$truckId/$timestamp.$extension"
+        return withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { response ->
+                val responseText = response.body?.string().orEmpty()
+                if (!response.isSuccessful) throw IllegalStateException(errorMessage(responseText, response.code))
+                "$BUCKET_PREFIX$truckId/$timestamp.$extension"
+            }
         }
     }
 
@@ -88,16 +91,18 @@ object SupabaseAudioStorage {
             .header("Authorization", "Bearer $token")
             .post(payload)
             .build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                val message = response.body?.string().orEmpty()
-                throw IllegalStateException(errorMessage(message, response.code))
+        return withContext(Dispatchers.IO) {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val message = response.body?.string().orEmpty()
+                    throw IllegalStateException(errorMessage(message, response.code))
+                }
+                val bytes = response.body?.bytes() ?: throw IllegalStateException("Empty audio response.")
+                val directory = File(context.cacheDir, "voice_deliveries").apply { mkdirs() }
+                val output = File(directory, "voice_${truckId}_${timestamp}.${extension}")
+                output.writeBytes(bytes)
+                output
             }
-            val bytes = response.body?.bytes() ?: throw IllegalStateException("Empty audio response.")
-            val directory = File(context.cacheDir, "voice_deliveries").apply { mkdirs() }
-            val output = File(directory, "voice_${truckId}_${timestamp}.${extension}")
-            output.writeBytes(bytes)
-            return output
         }
     }
 
