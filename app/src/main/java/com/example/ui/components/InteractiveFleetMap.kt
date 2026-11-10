@@ -255,6 +255,36 @@ fun InteractiveFleetMap(
         val width = constraints.maxWidth.toFloat()
         val height = constraints.maxHeight.toFloat()
 
+        val fitZoomLevel = run {
+            if (validTruckCoords.isEmpty()) {
+                15.2f
+            } else {
+                val minLat = validTruckCoords.minOf { it.currentLat }
+                val maxLat = validTruckCoords.maxOf { it.currentLat }
+                val minLng = validTruckCoords.minOf { it.currentLng }
+                val maxLng = validTruckCoords.maxOf { it.currentLng }
+                val midLatRadians = Math.toRadians((minLat + maxLat) / 2.0)
+                val longitudeSpan = (maxLng - minLng) * kotlin.math.cos(midLatRadians).coerceAtLeast(0.15)
+                val latitudeSpan = maxLat - minLat
+                val safeWidth = (width * 0.78f).coerceAtLeast(1f)
+                val safeHeight = (height * 0.78f).coerceAtLeast(1f)
+                val safeLonSpan = longitudeSpan.coerceAtLeast(0.002)
+                val safeLatSpan = latitudeSpan.coerceAtLeast(0.002)
+                val zoomForLongitude = kotlin.math.ln((360.0 * 256.0) / (safeLonSpan * safeWidth)) / kotlin.math.ln(2.0)
+                val zoomForLatitude = kotlin.math.ln((360.0 * 256.0) / (safeLatSpan * safeHeight)) / kotlin.math.ln(2.0)
+                kotlin.math.min(zoomForLongitude, zoomForLatitude).toFloat().coerceIn(10.5f, 17.5f)
+            }
+        }
+        val fleetMarkerKey = validTruckCoords.map { it.id }.sorted().joinToString(",")
+
+        LaunchedEffect(selectedTruckId, fleetMarkerKey) {
+            if (validTruckCoords.isNotEmpty()) {
+                zoomLevel = if (selectedTruckId == null) fitZoomLevel else 15.5f
+                panOffsetX = 0f
+                panOffsetY = 0f
+            }
+        }
+
         val cx = width / 2f
         val cy = height / 2f
 
@@ -748,7 +778,7 @@ fun InteractiveFleetMap(
                 onClick = {
                     panOffsetX = 0f
                     panOffsetY = 0f
-                    zoomLevel = 15.5f
+                    zoomLevel = if (selectedTruckId == null) fitZoomLevel else 15.5f
                 },
                 modifier = Modifier
                     .size(42.dp)

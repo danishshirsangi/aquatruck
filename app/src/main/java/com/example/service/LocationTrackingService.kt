@@ -245,7 +245,7 @@ class LocationTrackingService : Service() {
             fusedLocationClient.removeLocationUpdates(callback)
             val request = LocationRequest.Builder(priority, intervalMillis)
                 .setMinUpdateIntervalMillis(intervalMillis)
-                .setMinUpdateDistanceMeters(if (intervalMillis == MOVING_INTERVAL_MS) 10f else 0f)
+                .setMinUpdateDistanceMeters(if (intervalMillis == MOVING_INTERVAL_MS) 10f else 15f)
                 .build()
 
             fusedLocationClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
@@ -274,8 +274,8 @@ class LocationTrackingService : Service() {
         } else {
             stationarySamples++
             if (stationarySamples >= STATIONARY_SAMPLES_REQUIRED) {
-                // Balanced power while stationary reduces GPS power demand. The three-minute
-                // interval is retained so the existing stationary sampling policy is unchanged.
+                // Balanced power plus a modest stationary distance threshold reduces unnecessary
+                // callbacks. The three-minute interval remains unchanged.
                 requestLocationUpdates(
                     STATIONARY_INTERVAL_MS,
                     Priority.PRIORITY_BALANCED_POWER_ACCURACY
