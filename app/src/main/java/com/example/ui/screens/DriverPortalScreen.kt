@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.ui.FleetViewModel
+import com.example.data.tenant.TenantManager
 import com.example.ui.components.SelfieAttendanceDialog
 import com.example.ui.theme.CyanWater
 import com.example.ui.theme.OceanNavyPrimary
@@ -100,15 +101,21 @@ fun DriverPortalScreen(
     val activeAttendance by viewModel.activeAttendance.collectAsState()
     val selectedTruckStops by viewModel.selectedTruckStops.collectAsState()
     val shiftPolicy by viewModel.shiftPolicy.collectAsState()
+    val earlyLogoutAllowed by viewModel.earlyLogoutAllowed.collectAsState()
+    val assignedTruckId = TenantManager.assignedTruckId(context)
+    val isDriverAccount = TenantManager.role(context) == "driver"
+    val visibleTrucks = if (isDriverAccount && assignedTruckId != null) trucks.filter { it.id == assignedTruckId } else if (isDriverAccount) emptyList() else trucks
+    val currentUid = TenantManager.currentUserUid()
+    val visibleDrivers = if (isDriverAccount) drivers.filter { it.userUid == currentUid } else drivers
 
     // Driver identity selection state
     var selectedDriverName by remember { mutableStateOf<String?>(null) }
     var customDriverInput by remember { mutableStateOf("") }
     var isEnteringCustomDriver by remember { mutableStateOf(false) }
 
-    val currentTruck = selectedTruck ?: trucks.firstOrNull()
+    val currentTruck = selectedTruck?.takeIf { candidate -> visibleTrucks.any { it.id == candidate.id } } ?: visibleTrucks.firstOrNull()
     val effectiveTruck = if (loggedInTruckId != null) {
-        trucks.firstOrNull { it.id == loggedInTruckId } ?: currentTruck
+        visibleTrucks.firstOrNull { it.id == loggedInTruckId } ?: currentTruck
     } else {
         currentTruck
     }
@@ -116,7 +123,7 @@ fun DriverPortalScreen(
     val effectiveDriverName = loggedInDriverName
         ?: selectedDriverName
         ?: (if (customDriverInput.isNotBlank()) customDriverInput.trim() else null)
-        ?: drivers.firstOrNull()?.name
+        ?: visibleDrivers.firstOrNull()?.name
         ?: effectiveTruck?.driverName
         ?: "Driver"
 
@@ -127,7 +134,7 @@ fun DriverPortalScreen(
     val currentCalendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone(shiftPolicy.timezone))
     val currentMinutes = currentCalendar.get(java.util.Calendar.HOUR_OF_DAY) * 60 +
         currentCalendar.get(java.util.Calendar.MINUTE)
-    val isLogoutAllowed = shiftPolicy.allowEarlyLogout || currentMinutes >= shiftPolicy.logoutTimeMinutes
+    val isLogoutAllowed = earlyLogoutAllowed || currentMinutes >= shiftPolicy.logoutTimeMinutes
 
     // Voice recording & playback state
     val isRecording by viewModel.audioRecorder.isRecording.collectAsState()
@@ -158,7 +165,7 @@ fun DriverPortalScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Zero Trucks Fallback
-        if (trucks.isEmpty()) {
+        if (visibleTrucks.isEmpty()) {
             item {
                 Spacer(modifier = Modifier.height(30.dp))
                 Card(
@@ -189,7 +196,7 @@ fun DriverPortalScreen(
                             color = OceanNavyPrimary
                         )
                         Text(
-                            text = "Please ask the Manager to add your water tanker truck in the Manager Portal (PIN: 1234).",
+                            text = "Please ask your fleet manager to register your driver profile and assign a truck before starting a shift.",
                             textAlign = TextAlign.Center,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -235,7 +242,7 @@ fun DriverPortalScreen(
 
                         if (drivers.isNotEmpty()) {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                items(drivers) { driver ->
+                                items(visibleDrivers) { driver ->
                                     val isSelected = (selectedDriverName == driver.name) ||
                                             (selectedDriverName == null && !isEnteringCustomDriver && drivers.firstOrNull()?.name == driver.name)
 
@@ -349,7 +356,7 @@ fun DriverPortalScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            items(trucks) { truck ->
+                            items(visibleTrucks) { truck ->
                                 val isSelected = truck.id == selectedTruckId
                                 Card(
                                     modifier = Modifier

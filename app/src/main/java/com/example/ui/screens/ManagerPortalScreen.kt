@@ -80,6 +80,7 @@ import com.example.ui.components.AddDriverDialog
 import com.example.ui.components.AddTruckDialog
 import com.example.ui.components.InteractiveFleetMap
 import com.example.ui.components.ManagerShiftSettingsScreen
+import com.example.ui.components.ManagerDriverAssignmentsScreen
 import com.example.ui.theme.CyanWater
 import com.example.ui.theme.OceanNavyPrimary
 import com.example.ui.theme.StatusActiveGreen
@@ -126,7 +127,7 @@ fun ManagerPortalScreen(
     var pendingTruckDriver by remember { mutableStateOf("") }
     var pendingTruckCapacity by remember { mutableIntStateOf(10000) }
 
-    val tabs = listOf("Fleet Overview", "Interactive Map", "Voice Deliveries", "Stop Logs", "Attendance", "Shift Settings")
+    val tabs = listOf("Fleet Overview", "Interactive Map", "Voice Deliveries", "Stop Logs", "Attendance", "Shift Settings", "Drivers & Assignments")
 
     Column(
         modifier = modifier
@@ -220,6 +221,12 @@ fun ManagerPortalScreen(
                 trucks = trucks
             )
             5 -> ManagerShiftSettingsScreen(viewModel = viewModel)
+            6 -> ManagerDriverAssignmentsScreen(
+                drivers = drivers,
+                trucks = trucks,
+                onAssignTruck = { driverId, truckId -> viewModel.assignDriverToTruck(driverId, truckId) },
+                onEarlyLogoutChanged = { driverId, enabled -> viewModel.setDriverEarlyLogout(driverId, enabled) }
+            )
         }
     }
 

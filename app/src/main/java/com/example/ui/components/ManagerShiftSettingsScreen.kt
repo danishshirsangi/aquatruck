@@ -2,7 +2,6 @@ package com.example.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -29,7 +27,6 @@ import com.example.ui.FleetViewModel
 fun ManagerShiftSettingsScreen(viewModel: FleetViewModel) {
     val policy by viewModel.shiftPolicy.collectAsState()
     var timeText by remember(policy.logoutTimeMinutes) { mutableStateOf(policy.formattedLogoutTime()) }
-    var earlyLogout by remember(policy.allowEarlyLogout) { mutableStateOf(policy.allowEarlyLogout) }
     var error by remember { mutableStateOf<String?>(null) }
     var savedMessage by remember { mutableStateOf(false) }
 
@@ -39,7 +36,7 @@ fun ManagerShiftSettingsScreen(viewModel: FleetViewModel) {
     ) {
         Text("Driver shift settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "The configured time only unlocks the driver's logout button. Drivers are never automatically logged out and GPS tracking does not stop until they manually end the shift.",
+            "This is the default time when the driver's logout button becomes available. It does not end a shift automatically or stop GPS tracking.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium
         )
@@ -51,13 +48,11 @@ fun ManagerShiftSettingsScreen(viewModel: FleetViewModel) {
             placeholder = { Text("21:00") },
             singleLine = true
         )
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Allow early logout", fontWeight = FontWeight.SemiBold)
-                Text("Enable the driver's logout button before the configured time.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Switch(checked = earlyLogout, onCheckedChange = { earlyLogout = it; savedMessage = false })
-        }
+        Text(
+            "Early logout is controlled separately for each driver in Drivers & Assignments. A manager can enable or disable it when the driver requests permission.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Button(
             onClick = {
                 val parts = timeText.trim().split(":")
@@ -68,7 +63,7 @@ fun ManagerShiftSettingsScreen(viewModel: FleetViewModel) {
                     return@Button
                 }
                 error = null
-                viewModel.saveShiftPolicy(DriverShiftPolicy(hour * 60 + minute, earlyLogout, policy.timezone))
+                viewModel.saveShiftPolicy(DriverShiftPolicy(hour * 60 + minute, false, policy.timezone))
                 savedMessage = true
             },
             modifier = Modifier.fillMaxWidth()
@@ -76,6 +71,6 @@ fun ManagerShiftSettingsScreen(viewModel: FleetViewModel) {
         if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error)
         if (savedMessage) Text("Settings saved. Connected driver devices will receive the update.", color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(4.dp))
-        Text("Timezone: \${policy.timezone}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Timezone: ${policy.timezone}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
