@@ -16,9 +16,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import com.google.android.gms.mlkit.vision.codescanner.GmsBarcodeScanning
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +31,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.data.tenant.TenantManager
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.launch
 
 @Composable
@@ -53,6 +55,12 @@ fun BusinessOnboardingScreen(onComplete: () -> Unit) {
     var driverName by remember { mutableStateOf("") }
     var driverPhone by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    val qrScanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        result.contents?.trim()?.let { scanned ->
+            inviteCode = scanned.uppercase().take(16)
+            error = null
+        }
+    }
     var isLoading by remember { mutableStateOf(false) }
     var generatedCode by remember { mutableStateOf<String?>(null) }
 
@@ -101,13 +109,13 @@ fun BusinessOnboardingScreen(onComplete: () -> Unit) {
                         OutlinedTextField(inviteCode, { inviteCode = it.uppercase().take(12) }, label = { Text("One-time driver invitation code *") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                         Button(
                             onClick = {
-                                GmsBarcodeScanning.getClient(context).startScan()
-                                    .addOnSuccessListener { barcode ->
-                                        barcode.rawValue?.trim()?.let { inviteCode = it.uppercase().take(16) }
-                                    }
-                                    .addOnFailureListener { scanError ->
-                                        error = scanError.localizedMessage ?: "Unable to scan invitation QR code."
-                                    }
+                                val options = ScanOptions().apply {
+                                    setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                    setPrompt("Scan the driver's invitation QR code")
+                                    setBeepEnabled(false)
+                                    setOrientationLocked(true)
+                                }
+                                qrScanLauncher.launch(options)
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("Scan invitation QR code") }
