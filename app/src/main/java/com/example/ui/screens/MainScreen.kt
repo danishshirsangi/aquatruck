@@ -18,9 +18,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Badge
-import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.LocalShipping
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Security
@@ -56,6 +55,8 @@ import com.example.ui.UserRole
 import com.example.ui.components.ManagerPinDialog
 import com.example.ui.theme.CyanWater
 import com.example.ui.theme.OceanNavyPrimary
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -184,23 +185,24 @@ fun MainScreen(
                         }
                     }
 
-                    val isDarkTheme by viewModel.isDarkTheme.collectAsState()
-                    val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
-                    val currentDark = isDarkTheme ?: isSystemDark
-
-                    IconButton(
-                        onClick = { viewModel.toggleDarkTheme(currentDark) },
-                        modifier = Modifier
-                            .padding(end = 6.dp)
-                            .size(36.dp)
-                            .testTag("theme_toggle_button")
-                    ) {
-                        Icon(
-                            imageVector = if (currentDark) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = "Toggle Dark Mode",
-                            tint = if (currentDark) CyanWater else Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    if (currentRole == UserRole.MANAGER) {
+                        IconButton(
+                            onClick = {
+                                viewModel.lockManager()
+                                Firebase.auth.signOut()
+                            },
+                            modifier = Modifier
+                                .padding(end = 6.dp)
+                                .size(40.dp)
+                                .testTag("manager_sign_out_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Logout,
+                                contentDescription = "Sign out",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
