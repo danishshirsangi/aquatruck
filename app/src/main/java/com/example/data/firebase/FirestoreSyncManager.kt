@@ -187,12 +187,15 @@ class FirestoreSyncManager(private val context: Context) {
     suspend fun syncVoiceNote(note: VoiceDeliveryNote): Boolean {
         if (auth.currentUser == null) return false
         return try {
-            var audioReference = note.audioFilePath
             val localFile = File(note.audioFilePath)
             val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
                 .getString("organization_id", null)
             val user = auth.currentUser
-            if (localFile.exists() && !orgId.isNullOrBlank() && user != null) {
+            // Never publish a local file path as if it were a shared recording.
+            // If the file or tenant context is missing, leave the note pending for retry.
+            if (!localFile.exists() || orgId.isNullOrBlank() || user == null) return false
+            var audioReference: String
+            run {
                 val extension = localFile.extension.ifBlank { "m4a" }
                 val storageRef = FirebaseStorage.getInstance().reference
                     .child("organizations/" + orgId + "/voice/voice_" + note.truckId + "_" + note.timestamp + "." + extension)
