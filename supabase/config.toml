@@ -1,0 +1,3 @@
+[functions.voice-audio]
+# Firebase ID tokens are verified inside the function; Supabase JWT verification is not applicable.
+verify_jwt = false
