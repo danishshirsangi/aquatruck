@@ -171,20 +171,27 @@ class LocationTrackingService : Service() {
 
                 // Drain samples already received before marking the truck off duty and stopping.
                 serviceScope.launch {
-                    locationProcessorJob?.join()
-                    val dao = AppDatabase.getDatabase(applicationContext).fleetDao()
-                    dao.updateTruckShiftStatus(
-                        truckId = activeTruckId,
-                        active = false,
-                        status = "Off Duty",
-                        timestamp = System.currentTimeMillis()
-                    )
-                    LocationSyncScheduler.enqueue(applicationContext)
-                    sessionPrefs.edit().remove(PREF_TRUCK_ID).remove(PREF_TRUCK_NAME).apply()
-
-                    withContext(Dispatchers.Main) {
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                        stopSelfResult(startId)
+                    try {
+                        locationProcessorJob?.join()
+                        val dao = AppDatabase.getDatabase(applicationContext).fleetDao()
+                        dao.updateTruckShiftStatus(
+                            truckId = activeTruckId,
+                            active = false,
+                            status = "Off Duty",
+                            timestamp = System.currentTimeMillis()
+                        )
+                        // Flush the final locally saved locations/stops after shift end.
+                        LocationSyncScheduler.enqueue(applicationContext)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.e("LocationTrackingService", "Failed while stopping tracking cleanly", e)
+                    } finally {
+                        sessionPrefs.edit().remove(PREF_TRUCK_ID).remove(PREF_TRUCK_NAME).apply()
+                        withContext(Dispatchers.Main) {
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+                            stopSelfResult(startId)
+                        }
                     }
                 }
                 return START_NOT_STICKY
