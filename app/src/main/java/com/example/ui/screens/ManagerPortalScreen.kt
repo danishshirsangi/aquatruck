@@ -124,6 +124,7 @@ fun ManagerPortalScreen(
     var showAddTruckDialog by remember { mutableStateOf(false) }
     var showAddDriverDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
+    var driverPendingDeletion by remember { mutableStateOf<DriverEntity?>(null) }
     var showTestPaymentDialog by remember { mutableStateOf(false) }
     var pendingTruckName by remember { mutableStateOf("") }
     var pendingTruckPlate by remember { mutableStateOf("") }
@@ -181,6 +182,7 @@ fun ManagerPortalScreen(
                     selectedTabIndex = 1
                 },
                 onDeleteTruck = { viewModel.deleteTruck(it) },
+                onDeleteDriver = { driverPendingDeletion = it },
                 onEndShift = { viewModel.managerEndTruckShift(it, context) },
                 onResetAllClicked = { showResetConfirmDialog = true }
             )
@@ -231,6 +233,23 @@ fun ManagerPortalScreen(
                 onEarlyLogoutChanged = { driverId, enabled -> viewModel.setDriverEarlyLogout(driverId, enabled) }
             )
         }
+    }
+
+    driverPendingDeletion?.let { driver ->
+        AlertDialog(
+            onDismissRequest = { driverPendingDeletion = null },
+            title = { Text("Delete driver?") },
+            text = { Text("Remove ${driver.name} from this business? Their invitation will be deactivated and their driver membership removed.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteDriver(driver.id)
+                    driverPendingDeletion = null
+                }) { Text("Delete", color = StatusRedAlert) }
+            },
+            dismissButton = {
+                TextButton(onClick = { driverPendingDeletion = null }) { Text("Cancel") }
+            }
+        )
     }
 
     if (showAddTruckDialog) {
@@ -335,6 +354,7 @@ private fun FleetOverviewTab(
     onAddDriverClicked: () -> Unit,
     onSelectTruckForMap: (Int) -> Unit,
     onDeleteTruck: (Int) -> Unit,
+    onDeleteDriver: (DriverEntity) -> Unit = {},
     onEndShift: (Int) -> Unit = {},
     onResetAllClicked: () -> Unit = {}
 ) {
@@ -616,6 +636,13 @@ private fun FleetOverviewTab(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Code: ${driver.invitationCode}", fontWeight = FontWeight.Bold)
                             TextButton(onClick = { clipboard.setText(AnnotatedString(driver.invitationCode!!)) }) { Text("Copy code") }
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { onDeleteDriver(driver) }) {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = StatusRedAlert, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Delete driver", color = StatusRedAlert)
                         }
                     }
                 }
