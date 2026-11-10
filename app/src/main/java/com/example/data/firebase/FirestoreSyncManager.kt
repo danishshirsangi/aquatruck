@@ -12,6 +12,11 @@ import com.example.data.model.VoiceDeliveryNote
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.CollectionReference
+import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
+import java.io.File
+import android.net.Uri
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
 
@@ -23,6 +28,40 @@ class FirestoreSyncManager(private val context: Context) {
     }
 
     private val auth get() = Firebase.auth
+
+    private fun collection(name: String): CollectionReference {
+        val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+            .getString("organization_id", null)
+        return if (orgId.isNullOrBlank()) firestore.collection(name) else {
+            firestore.collection("organizations").document(orgId).collection(name)
+        }
+    }
+
+    suspend fun recordTestTruckSubscription(truckId: Int): Boolean {
+        val user = auth.currentUser ?: return false
+        val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+            .getString("organization_id", null) ?: return false
+        return try {
+            val now = System.currentTimeMillis()
+            firestore.collection("organizations").document(orgId)
+                .collection("truck_subscriptions").document(truckId.toString())
+                .set(hashMapOf(
+                    "truckId" to truckId,
+                    "amountPaise" to 9900,
+                    "currency" to "INR",
+                    "billingPeriod" to "monthly",
+                    "mode" to "test",
+                    "status" to "test_active",
+                    "startedAt" to now,
+                    "renewsAt" to now + 30L * 24L * 60L * 60L * 1000L,
+                    "createdBy" to user.uid
+                )).await()
+            true
+        } catch (e: Exception) {
+            Log.w("FirestoreSync", "Unable to save test truck subscription: ${e.message}", e)
+            false
+        }
+    }
 
     suspend fun syncTruck(truck: TruckEntity) {
         if (auth.currentUser == null) return
@@ -41,7 +80,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "statusText" to truck.statusText,
                 "lastUpdated" to truck.lastUpdated
             )
-            firestore.collection("trucks").document("truck_${truck.id}")
+            collection("trucks").document("truck_${truck.id}")
                 .set(data, SetOptions.merge())
                 .await()
         } catch (e: Exception) {
@@ -52,7 +91,7 @@ class FirestoreSyncManager(private val context: Context) {
     suspend fun deleteTruck(truckId: Int) {
         if (auth.currentUser == null) return
         try {
-            firestore.collection("trucks").document("truck_$truckId").delete().await()
+            collection("trucks").document("truck_$truckId").delete().await()
         } catch (e: Exception) {
             Log.w("FirestoreSync", "Error deleting truck: ${e.message}")
         }
@@ -68,7 +107,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "assignedTruckId" to driver.assignedTruckId,
                 "createdAt" to driver.createdAt
             )
-            firestore.collection("drivers").document("driver_${driver.id}")
+            collection("drivers").document("driver_${driver.id}")
                 .set(data, SetOptions.merge())
                 .await()
         } catch (e: Exception) {
@@ -79,7 +118,7 @@ class FirestoreSyncManager(private val context: Context) {
     suspend fun deleteDriver(driverId: Long) {
         if (auth.currentUser == null) return
         try {
-            firestore.collection("drivers").document("driver_$driverId").delete().await()
+            collection("drivers").document("driver_$driverId").delete().await()
         } catch (e: Exception) {
             Log.w("FirestoreSync", "Error deleting driver: ${e.message}")
         }
@@ -99,7 +138,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "checkInLng" to record.checkInLng,
                 "isCompleted" to record.isCompleted
             )
-            firestore.collection("attendance").document("att_${record.id}")
+            collection("attendance").document("att_${record.id}")
                 .set(data, SetOptions.merge())
                 .await()
         } catch (e: Exception) {
@@ -110,18 +149,35 @@ class FirestoreSyncManager(private val context: Context) {
     suspend fun syncVoiceNote(note: VoiceDeliveryNote) {
         if (auth.currentUser == null) return
         try {
+            var audioReference = note.audioFilePath
+            val localFile = File(note.audioFilePath)
+            val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+                .getString("organization_id", null)
+            val user = auth.currentUser
+            if (localFile.exists() && !orgId.isNullOrBlank() && user != null) {
+                val extension = localFile.extension.ifBlank { "m4a" }
+                val storageRef = FirebaseStorage.getInstance().reference
+                    .child("organizations/" + orgId + "/voice/voice_" + note.id + "." + extension)
+                val metadata = StorageMetadata.Builder()
+                    .setContentType(if (extension.equals("wav", true)) "audio/wav" else "audio/mp4")
+                    .setCustomMetadata("organizationId", orgId)
+                    .setCustomMetadata("ownerUid", user.uid)
+                    .build()
+                storageRef.putFile(Uri.fromFile(localFile), metadata).await()
+                audioReference = storageRef.downloadUrl.await().toString()
+            }
             val data = hashMapOf(
                 "id" to note.id,
                 "truckId" to note.truckId,
                 "driverName" to note.driverName,
-                "audioFilePath" to note.audioFilePath,
+                "audioFilePath" to audioReference,
                 "durationSeconds" to note.durationSeconds,
                 "latitude" to note.latitude,
                 "longitude" to note.longitude,
                 "locationLabel" to note.locationLabel,
                 "timestamp" to note.timestamp
             )
-            firestore.collection("voice_delivery_notes").document("voice_${note.id}")
+            collection("voice_delivery_notes").document("voice_${note.id}")
                 .set(data, SetOptions.merge())
                 .await()
         } catch (e: Exception) {
@@ -141,7 +197,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "accuracyMeters" to point.accuracyMeters,
                 "timestamp" to point.timestamp
             )
-            firestore.collection("location_points").document("loc_${point.truckId}_${point.timestamp}")
+            collection("location_points").document("loc_${point.truckId}_${point.timestamp}")
                 .set(data, SetOptions.merge())
                 .await()
         } catch (e: Exception) {
@@ -170,7 +226,7 @@ class FirestoreSyncManager(private val context: Context) {
                         "timestamp" to point.timestamp
                     )
                     batch.set(
-                        firestore.collection("location_points")
+                        collection("location_points")
                             .document("loc_${point.truckId}_${point.timestamp}"),
                         data,
                         SetOptions.merge()
@@ -199,7 +255,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "addressOrLabel" to stop.addressOrLabel,
                 "category" to stop.category
             )
-            firestore.collection("stop_records").document("stop_${stop.id}")
+            collection("stop_records").document("stop_${stop.id}")
                 .set(data, SetOptions.merge())
                 .await()
             true
@@ -232,7 +288,7 @@ class FirestoreSyncManager(private val context: Context) {
                         "category" to stop.category
                     )
                     batch.set(
-                        firestore.collection("stop_records").document("stop_${stop.id}"),
+                        collection("stop_records").document("stop_${stop.id}"),
                         data,
                         SetOptions.merge()
                     )

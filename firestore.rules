@@ -1,36 +1,124 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAuthenticated() {
-      return request.auth != null;
+    function signedIn() { return request.auth != null; }
+    function memberDoc(orgId) {
+      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
+    }
+    function isMember(orgId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid))
+        && memberDoc(orgId).data.status == "active";
+    }
+    function isManager(orgId) {
+      return isMember(orgId) && memberDoc(orgId).data.role == "manager";
+    }
+    function isManagerAfter(orgId) {
+      return signedIn()
+        && existsAfter(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid))
+        && getAfter(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role == "manager";
+    }
+    function isDriver(orgId) {
+      return isMember(orgId) && memberDoc(orgId).data.role == "driver";
+    }
+    function assignedTruckId(orgId) { return memberDoc(orgId).data.assignedTruckId; }
+    function ownsTruck(orgId, data) {
+      return isDriver(orgId) && data.truckId == assignedTruckId(orgId);
     }
 
-    match /trucks/{truckId} {
-      allow read, write: if isAuthenticated();
+    match /users/{uid} {
+      allow get, create, update: if signedIn() && request.auth.uid == uid;
+      allow list, delete: if false;
     }
 
-    match /drivers/{driverId} {
-      allow read, write: if isAuthenticated();
+    match /business_codes/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && getAfter(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)).data.ownerUid == request.auth.uid;
+      allow update, delete: if isManager(resource.data.organizationId);
     }
 
-    match /attendance/{attendanceId} {
-      allow read, write: if isAuthenticated();
-    }
+    match /organizations/{orgId} {
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow get: if isMember(orgId);
+      allow list: if false;
+      allow update: if isManager(orgId);
+      allow delete: if false;
 
-    match /voice_delivery_notes/{noteId} {
-      allow read, write: if isAuthenticated();
-    }
+      match /members/{uid} {
+        allow get: if isMember(orgId) && (isManager(orgId) || request.auth.uid == uid);
+        allow list: if isManager(orgId);
+        allow create: if signedIn() && request.auth.uid == uid && (
+          getAfter(/databases/$(database)/documents/organizations/$(orgId)).data.ownerUid == uid
+          || get(/databases/$(database)/documents/business_codes/$(request.resource.data.invitationCode)).data.organizationId == orgId
+        );
+        allow update, delete: if isManager(orgId);
+      }
 
-    match /location_points/{pointId} {
-      allow read, write: if isAuthenticated();
-    }
+      match /manager_secrets/{uid} {
+        allow read: if signedIn() && request.auth.uid == uid && isManager(orgId);
+        allow create, update: if signedIn() && request.auth.uid == uid && isManagerAfter(orgId);
+        allow delete: if isManager(orgId);
+      }
 
-    match /stop_records/{stopId} {
-      allow read, write: if isAuthenticated();
-    }
+      match /settings/{settingId} {
+        allow read: if isMember(orgId);
+        allow create, update: if isManagerAfter(orgId);
+        allow delete: if isManager(orgId);
+      }
 
-    match /delivery_proofs/{proofId} {
-      allow read, write: if isAuthenticated();
+      match /trucks/{truckId} {
+        allow read: if isMember(orgId);
+        allow create, delete: if isManager(orgId);
+        allow update: if isManager(orgId) || (
+          isDriver(orgId)
+          && resource.data.id == assignedTruckId(orgId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["currentLat", "currentLng", "currentSpeedKmh", "isShiftActive", "statusText", "lastUpdated", "driverName"])
+        );
+      }
+
+      match /drivers/{driverId} {
+        allow read: if isManager(orgId) || (isMember(orgId) && resource.data.uid == request.auth.uid);
+        allow create: if isManager(orgId) || (signedIn() && request.resource.data.uid == request.auth.uid
+          && request.resource.data.status == "active");
+        allow update, delete: if isManager(orgId);
+      }
+
+      match /truck_subscriptions/{truckId} {
+        allow read, write: if isManager(orgId);
+      }
+
+      match /location_points/{pointId} {
+        allow read: if isManager(orgId) || ownsTruck(orgId, resource.data);
+        allow create: if isManager(orgId) || ownsTruck(orgId, request.resource.data);
+        allow update, delete: if isManager(orgId);
+      }
+
+      match /stop_records/{stopId} {
+        allow read: if isManager(orgId) || ownsTruck(orgId, resource.data);
+        allow create: if isManager(orgId) || ownsTruck(orgId, request.resource.data);
+        allow update, delete: if isManager(orgId);
+      }
+
+      match /attendance/{attendanceId} {
+        allow read: if isManager(orgId) || ownsTruck(orgId, resource.data);
+        allow create, update: if isManager(orgId) || ownsTruck(orgId, request.resource.data);
+        allow delete: if isManager(orgId);
+      }
+
+      match /voice_delivery_notes/{noteId} {
+        allow read: if isManager(orgId) || ownsTruck(orgId, resource.data);
+        allow create: if isManager(orgId) || ownsTruck(orgId, request.resource.data);
+        allow update, delete: if isManager(orgId);
+      }
+
+      match /delivery_proofs/{proofId} {
+        allow read: if isManager(orgId) || ownsTruck(orgId, resource.data);
+        allow create: if isManager(orgId) || ownsTruck(orgId, request.resource.data);
+        allow update, delete: if isManager(orgId);
+      }
     }
   }
 }

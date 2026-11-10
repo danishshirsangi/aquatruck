@@ -1,0 +1,16 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /organizations/{orgId}/voice/{fileName} {
+      allow create, update: if request.auth != null
+        && request.resource.metadata.organizationId == orgId
+        && request.resource.metadata.ownerUid == request.auth.uid
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches("audio/.*");
+      allow read: if request.auth != null
+        && resource.metadata.ownerUid == request.auth.uid;
+      allow delete: if request.auth != null
+        && resource.metadata.ownerUid == request.auth.uid;
+    }
+  }
+}
