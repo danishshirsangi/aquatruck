@@ -34,6 +34,7 @@ data class DriverShiftPolicy(
 object TenantManager {
     private const val PREFS = "aquatrack_tenant"
     private const val KEY_ORG = "organization_id"
+    private const val KEY_UID = "firebase_user_uid"
     private const val KEY_ROLE = "organization_role"
     private const val KEY_BUSINESS_NAME = "business_name"
     private const val KEY_BUSINESS_CODE = "business_code"
@@ -56,12 +57,21 @@ object TenantManager {
 
     fun currentUserUid(): String? = Firebase.auth.currentUser?.uid
 
-    fun hasActiveOrganization(context: Context): Boolean =
-        !organizationId(context).isNullOrBlank() && !role(context).isNullOrBlank()
+    fun hasActiveOrganization(context: Context): Boolean {
+        val currentUid = Firebase.auth.currentUser?.uid ?: return false
+        val savedUid = prefs(context).getString(KEY_UID, null)
+        return savedUid == currentUid &&
+            !organizationId(context).isNullOrBlank() &&
+            !role(context).isNullOrBlank()
+    }
 
     private suspend fun rememberMembership(context: Context, orgId: String, memberRole: String, name: String, code: String? = null, assignedTruckId: Int? = null) {
+        val currentUid = Firebase.auth.currentUser?.uid
+            ?: throw IllegalStateException("Sign in before selecting a business.")
         val previousOrgId = organizationId(context)
-        if (!previousOrgId.isNullOrBlank() && previousOrgId != orgId) {
+        val previousUid = prefs(context).getString(KEY_UID, null)
+        if ((!previousOrgId.isNullOrBlank() && previousOrgId != orgId) ||
+            (!previousUid.isNullOrBlank() && previousUid != currentUid)) {
             // A device can be shared or change signed-in accounts. Do not let the next
             // business inherit the previous business's local fleet/history cache.
             runCatching {
@@ -79,9 +89,15 @@ object TenantManager {
                 .edit().clear().apply()
             context.getSharedPreferences("aquatrack_tracking_service", Context.MODE_PRIVATE)
                 .edit().clear().apply()
+            prefs(context).edit()
+                .remove(KEY_PIN_SALT)
+                .remove(KEY_PIN_HASH)
+                .remove(KEY_BUSINESS_CODE)
+                .apply()
         }
 
         prefs(context).edit()
+            .putString(KEY_UID, currentUid)
             .putString(KEY_ORG, orgId)
             .putString(KEY_ROLE, memberRole)
             .putString(KEY_BUSINESS_NAME, name)
