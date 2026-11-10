@@ -185,9 +185,9 @@ class FirestoreSyncManager(private val context: Context) {
         }
     }
 
-    suspend fun syncStop(stop: StopRecord) {
-        if (auth.currentUser == null) return
-        try {
+    suspend fun syncStop(stop: StopRecord): Boolean {
+        if (auth.currentUser == null) return false
+        return try {
             val data = hashMapOf(
                 "id" to stop.id,
                 "truckId" to stop.truckId,
@@ -202,8 +202,47 @@ class FirestoreSyncManager(private val context: Context) {
             firestore.collection("stop_records").document("stop_${stop.id}")
                 .set(data, SetOptions.merge())
                 .await()
+            true
         } catch (e: Exception) {
-            Log.w("FirestoreSync", "Error syncing stop: ${e.message}")
+            Log.w("FirestoreSync", "Error syncing stop: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Uploads pending stop records in one Firestore batch per chunk.
+     * The caller marks records synced only after this returns true.
+     */
+    suspend fun syncStopBatch(stops: List<StopRecord>): Boolean {
+        if (stops.isEmpty()) return true
+        if (auth.currentUser == null) return false
+        return try {
+            stops.chunked(450).forEach { chunk ->
+                val batch = firestore.batch()
+                chunk.forEach { stop ->
+                    val data = hashMapOf(
+                        "id" to stop.id,
+                        "truckId" to stop.truckId,
+                        "latitude" to stop.latitude,
+                        "longitude" to stop.longitude,
+                        "startTime" to stop.startTime,
+                        "endTime" to stop.endTime,
+                        "durationMinutes" to stop.durationMinutes,
+                        "addressOrLabel" to stop.addressOrLabel,
+                        "category" to stop.category
+                    )
+                    batch.set(
+                        firestore.collection("stop_records").document("stop_${stop.id}"),
+                        data,
+                        SetOptions.merge()
+                    )
+                }
+                batch.commit().await()
+            }
+            true
+        } catch (e: Exception) {
+            Log.w("FirestoreSync", "Stop batch upload failed: ${e.message}", e)
+            false
         }
     }
 
