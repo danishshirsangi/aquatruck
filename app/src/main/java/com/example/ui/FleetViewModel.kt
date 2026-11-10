@@ -48,6 +48,9 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     val audioRecorder = AudioRecorderManager(application)
     val audioPlayer = AudioPlayerManager()
 
+    private val _voiceUploadStatus = MutableStateFlow("Idle")
+    val voiceUploadStatus: StateFlow<String> = _voiceUploadStatus.asStateFlow()
+
     val allTrucks: StateFlow<List<TruckEntity>> = dao.getAllTrucks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -630,12 +633,15 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             )
             val savedNoteId = dao.insertVoiceNote(note)
             val savedNote = note.copy(id = savedNoteId)
+            _voiceUploadStatus.value = "Uploading voice recording…"
 
             // Upload the recording immediately while its local file is guaranteed to exist.
             // WorkManager remains the offline/retry fallback.
             if (firestoreSync.syncVoiceNote(savedNote)) {
                 dao.markVoiceNotesSynced(listOf(savedNoteId))
+                _voiceUploadStatus.value = "Uploaded successfully"
             } else {
+                _voiceUploadStatus.value = "Upload pending — will retry when connected"
                 LocationSyncScheduler.enqueue(context)
             }
 
