@@ -202,51 +202,52 @@ object TenantManager {
         return code
     }
 
-    suspend fun joinBusiness(context: Context, businessCode: String, driverName: String, phone: String): String {
+    fun generateDriverInviteCode(): String {
+        val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        val random = SecureRandom()
+        return buildString { repeat(12) { append(alphabet[random.nextInt(alphabet.length)]) } }
+    }
+
+    suspend fun joinBusiness(context: Context, driverInvitationCode: String, driverName: String, phone: String): String {
         val user = Firebase.auth.currentUser
             ?: throw IllegalStateException("Sign in with Google before joining a business.")
         require(driverName.isNotBlank()) { "Driver name is required." }
-        val code = businessCode.trim().uppercase()
-        require(code.length in 6..12) { "Enter a valid business invitation code." }
+        require(phone.filter { it.isDigit() }.length >= 8) { "Enter the phone number registered by your manager." }
+        val code = driverInvitationCode.trim().uppercase()
+        require(code.length in 10..16) { "Enter the one-time driver invitation code shared by your manager." }
 
         val db = firestore(context)
-        val codeSnapshot = db.collection("business_codes").document(code).get().await()
-        if (!codeSnapshot.exists() || codeSnapshot.getBoolean("active") != true) {
-            throw IllegalArgumentException("Business code not found or no longer active.")
+        val invitationRef = db.collection("driver_invitations").document(code)
+        val invitation = invitationRef.get().await()
+        if (!invitation.exists() || invitation.getBoolean("active") != true || !invitation.getString("uid").isNullOrBlank()) {
+            throw IllegalArgumentException("This driver invitation is invalid, expired or already used.")
         }
-        val orgId = codeSnapshot.getString("organizationId")
-            ?: throw IllegalStateException("This invitation is incomplete.")
-        val businessName = codeSnapshot.getString("businessName") ?: "Business"
+        if (invitation.getString("phoneHash") != hashPhone(phone)) {
+            throw IllegalArgumentException("The phone number does not match the number registered by your manager.")
+        }
+
+        val orgId = invitation.getString("organizationId")
+            ?: throw IllegalStateException("Invitation is missing its business assignment.")
+        val businessName = invitation.getString("businessName") ?: "Business"
         val existing = db.collection("users").document(user.uid).get().await()
         val oldOrg = existing.getString("organizationId")
         if (!oldOrg.isNullOrBlank() && oldOrg != orgId) {
             throw IllegalStateException("This Google account is already assigned to another business.")
         }
 
-        require(phone.isNotBlank()) { "Enter the phone number registered by your manager." }
-        val invitationId = hashPhone(phone)
-        val orgRef = db.collection("organizations").document(orgId)
-        val invitationRef = orgRef.collection("driver_invitations").document(invitationId)
-        val invitation = invitationRef.get().await()
-        if (!invitation.exists() || invitation.getBoolean("active") != true) {
-            throw IllegalArgumentException("No active driver invitation matches this phone number. Ask the manager to register you first.")
-        }
-        if (!invitation.getString("uid").isNullOrBlank()) {
-            throw IllegalStateException("This driver invitation has already been claimed.")
-        }
         val assignedTruckId = (invitation.getLong("assignedTruckId") ?: 0L).toInt()
-        if (assignedTruckId <= 0) {
-            throw IllegalStateException("The manager must assign a truck before this driver can join.")
-        }
+        if (assignedTruckId <= 0) throw IllegalStateException("The manager must assign a truck before you can join.")
         val driverId = invitation.getLong("driverId")
-            ?: throw IllegalStateException("Driver invitation is missing its driver profile.")
+            ?: throw IllegalStateException("Invitation is missing the driver profile.")
+        val orgRef = db.collection("organizations").document(orgId)
         val driverRef = orgRef.collection("drivers").document("driver_" + driverId)
         val now = System.currentTimeMillis()
+        val driverDisplayName = invitation.getString("driverName") ?: driverName.trim()
         val batch = db.batch()
         batch.update(invitationRef, mapOf("uid" to user.uid, "claimedAt" to now, "active" to false))
         batch.update(driverRef, mapOf(
             "uid" to user.uid,
-            "name" to (invitation.getString("name") ?: driverName.trim()),
+            "name" to driverDisplayName,
             "phone" to phone.trim(),
             "assignedTruckId" to assignedTruckId,
             "status" to "active"
@@ -255,20 +256,20 @@ object TenantManager {
             "uid" to user.uid,
             "driverId" to driverId,
             "role" to "driver",
-            "name" to (invitation.getString("name") ?: driverName.trim()),
+            "name" to driverDisplayName,
             "phone" to phone.trim(),
             "assignedTruckId" to assignedTruckId,
             "earlyLogoutEnabled" to false,
             "status" to "active",
             "createdAt" to now,
-            "invitationCode" to code
+            "invitationId" to code
         ))
         batch.set(db.collection("users").document(user.uid), mapOf(
             "uid" to user.uid,
             "organizationId" to orgId,
             "role" to "driver",
             "businessName" to businessName,
-            "displayName" to (invitation.getString("name") ?: driverName.trim()),
+            "displayName" to driverDisplayName,
             "phone" to phone.trim(),
             "updatedAt" to now
         ))
@@ -331,8 +332,14 @@ object TenantManager {
                 assignedTruckId = (doc.getLong("assignedTruckId") ?: 0L).toInt(),
                 createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis(),
                 userUid = doc.getString("uid")?.takeIf { it.isNotBlank() },
-                earlyLogoutEnabled = doc.getBoolean("earlyLogoutEnabled") ?: false
-            ))
+                earlyLogoutEnabled = doc.getBoolean("earlyLogoutEnabled") ?: false,
+                invitationCode = doc.getString("invitationCode") ?: if (isManager) generateDriverInviteCode() else null
+            ).also { driver ->
+                dao.insertDriver(driver)
+                if (isManager && doc.getString("invitationCode").isNullOrBlank()) {
+                    com.example.data.firebase.FirestoreSyncManager(context).syncDriver(driver)
+                }
+            })
         }
 
         val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
@@ -438,11 +445,14 @@ object TenantManager {
             batch.set(root.collection("members").document(uid), mapOf("assignedTruckId" to truckId),
                 com.google.firebase.firestore.SetOptions.merge())
         }
-        val normalizedPhone = driver.phone.filter { it.isDigit() }
-        if (normalizedPhone.length >= 8) {
-            batch.set(root.collection("driver_invitations").document(hashPhone(driver.phone)),
+        driver.invitationCode?.let { code ->
+            batch.set(firestore(context).collection("driver_invitations").document(code),
                 mapOf(
+                    "organizationId" to orgId,
+                    "businessName" to (businessName(context) ?: "Business"),
                     "driverId" to driver.id,
+                    "driverName" to driver.name,
+                    "phoneHash" to hashPhone(driver.phone),
                     "assignedTruckId" to truckId,
                     "active" to driver.userUid.isNullOrBlank()
                 ), com.google.firebase.firestore.SetOptions.merge())
