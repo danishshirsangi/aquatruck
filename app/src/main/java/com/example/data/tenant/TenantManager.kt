@@ -348,14 +348,9 @@ object TenantManager {
         val dao = com.example.data.db.AppDatabase.getDatabase(context).fleetDao()
         val root = firestore(context).collection("organizations").document(orgId)
 
-        val truckDocs = if (isManager) {
-            root.collection("trucks").get().await().documents
-        } else if (assignedId != null && assignedId > 0) {
-            val truck = root.collection("trucks").document("truck_$assignedId").get().await()
-            if (truck.exists()) listOf(truck) else emptyList()
-        } else {
-            emptyList()
-        }
+        // Drivers can select another available tanker for a shift. Their identity and
+        // business membership remain fixed; only the vehicle selection is flexible.
+        val truckDocs = root.collection("trucks").get().await().documents
 
         truckDocs.forEach { doc ->
             val id = (doc.getLong("id") ?: doc.id.removePrefix("truck_").toLongOrNull() ?: return@forEach).toInt()
