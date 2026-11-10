@@ -295,6 +295,9 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setRole(role: UserRole) {
+        if (role == UserRole.MANAGER) {
+            if (TenantManager.role(getApplication()) != "manager" || !_isManagerUnlocked.value) return
+        }
         _currentRole.value = role
     }
 
@@ -370,9 +373,11 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteDriver(driverId: Long) {
+        if (TenantManager.role(getApplication()) != "manager" || !_isManagerUnlocked.value) return
         viewModelScope.launch(Dispatchers.IO) {
+            val driver = allDrivers.value.firstOrNull { it.id == driverId } ?: return@launch
+            firestoreSync.deleteDriver(driver)
             dao.deleteDriver(driverId)
-            firestoreSync.deleteDriver(driverId)
         }
     }
 
