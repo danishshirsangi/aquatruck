@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,8 +24,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import com.example.data.model.DriverEntity
 import com.example.data.model.TruckEntity
 
@@ -73,6 +78,7 @@ fun ManagerDriverAssignmentsScreen(
                     if (driver.userUid.isNullOrBlank()) {
                         driver.invitationCode?.let { code ->
                             Text("One-time driver code: $code", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                            DriverInviteQrCode(code)
                         }
                     }
                     val assignedTruckIsActive = trucks.firstOrNull { it.id == driver.assignedTruckId }?.isShiftActive == true
@@ -124,4 +130,24 @@ fun ManagerDriverAssignmentsScreen(
             }
         }
     }
+}
+
+
+@Composable
+private fun DriverInviteQrCode(code: String) {
+    val bitmap = remember(code) {
+        val matrix = QRCodeWriter().encode(code, BarcodeFormat.QR_CODE, 420, 420)
+        Bitmap.createBitmap(420, 420, Bitmap.Config.ARGB_8888).also { image ->
+            for (x in 0 until 420) {
+                for (y in 0 until 420) {
+                    image.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+                }
+            }
+        }
+    }
+    Image(
+        bitmap = bitmap.asImageBitmap(),
+        contentDescription = "QR code for driver invitation $code",
+        modifier = Modifier.fillMaxWidth().padding(8.dp)
+    )
 }
