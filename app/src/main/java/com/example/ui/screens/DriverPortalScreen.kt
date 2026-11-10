@@ -48,6 +48,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -123,12 +125,16 @@ fun DriverPortalScreen(
         currentTruck
     }
 
-    val effectiveDriverName = loggedInDriverName
-        ?: selectedDriverName
-        ?: (if (customDriverInput.isNotBlank()) customDriverInput.trim() else null)
-        ?: visibleDrivers.firstOrNull()?.name
-        ?: effectiveTruck?.driverName
-        ?: "Driver"
+    val effectiveDriverName = if (isDriverAccount) {
+        visibleDrivers.firstOrNull()?.name ?: loggedInDriverName ?: "Driver"
+    } else {
+        loggedInDriverName
+            ?: selectedDriverName
+            ?: (if (customDriverInput.isNotBlank()) customDriverInput.trim() else null)
+            ?: visibleDrivers.firstOrNull()?.name
+            ?: effectiveTruck?.driverName
+            ?: "Driver"
+    }
 
     // Session lock & shift active status: persists across app closes
     val isShiftActive = (loggedInTruckId != null && effectiveTruck?.isShiftActive == true)
@@ -156,6 +162,7 @@ fun DriverPortalScreen(
     val isPlaying by viewModel.audioPlayer.isPlaying.collectAsState()
 
     var showSelfieDialog by remember { mutableStateOf(false) }
+    var switchTruckMenuExpanded by remember { mutableStateOf(false) }
 
     // Pulse animation for recording mic
     val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
@@ -223,6 +230,26 @@ fun DriverPortalScreen(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // A driver account is bound to the identity claimed through its one-time invitation.
+                    if (isDriverAccount) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = StatusActiveGreen, modifier = Modifier.size(26.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text("SIGNED IN DRIVER", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(effectiveDriverName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    Text("Your identity is linked to your invitation and cannot be changed here.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    } else {
                     // 1. SELECT WHO YOU ARE
                     Column {
                         Row(
@@ -338,6 +365,8 @@ fun DriverPortalScreen(
                                 shape = RoundedCornerShape(14.dp)
                             )
                         }
+                    }
+
                     }
 
                     // 2. WHICH TRUCK ARE YOU GONNA DRIVE?
@@ -576,12 +605,44 @@ fun DriverPortalScreen(
                                     color = CyanWater.copy(alpha = 0.2f)
                                 ) {
                                     Text(
-                                        text = "LOCKED",
+                                        text = "SHIFT ACTIVE",
                                         color = CyanWater,
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 11.sp,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
+                                }
+                            }
+                        }
+
+                        if (isDriverAccount) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                                    Text("Switch tanker", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Text("Your current shift will be closed on this tanker and a new attendance and GPS tracking session will start on the selected available tanker.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Box {
+                                        Button(onClick = { switchTruckMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                                            Text("Change tanker")
+                                        }
+                                        DropdownMenu(
+                                            expanded = switchTruckMenuExpanded,
+                                            onDismissRequest = { switchTruckMenuExpanded = false }
+                                        ) {
+                                            trucks.filter { it.id != truck.id && !it.isShiftActive }.forEach { candidate ->
+                                                DropdownMenuItem(
+                                                    text = { Text("${candidate.name} (${candidate.plateNumber})") },
+                                                    onClick = {
+                                                        switchTruckMenuExpanded = false
+                                                        viewModel.switchDriverTruck(candidate.id, context)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
