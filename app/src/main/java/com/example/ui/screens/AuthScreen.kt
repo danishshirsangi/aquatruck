@@ -50,7 +50,6 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.R
 import com.example.ui.theme.CyanWater
-import com.example.ui.theme.OceanNavyDark
 import com.example.ui.theme.OceanNavyPrimary
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
@@ -76,7 +75,7 @@ fun AuthScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(OceanNavyDark)
+            .background(MaterialTheme.colorScheme.background)
             .testTag("auth_screen"),
         contentAlignment = Alignment.Center
     ) {
