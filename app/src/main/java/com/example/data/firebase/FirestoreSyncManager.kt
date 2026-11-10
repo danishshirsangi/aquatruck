@@ -194,19 +194,16 @@ class FirestoreSyncManager(private val context: Context) {
             // Never publish a local file path as if it were a shared recording.
             // If the file or tenant context is missing, leave the note pending for retry.
             if (!localFile.exists() || orgId.isNullOrBlank() || user == null) return false
-            var audioReference: String
-            run {
-                val extension = localFile.extension.ifBlank { "m4a" }
-                val storageRef = FirebaseStorage.getInstance().reference
-                    .child("organizations/" + orgId + "/voice/voice_" + note.truckId + "_" + note.timestamp + "." + extension)
-                val metadata = StorageMetadata.Builder()
-                    .setContentType(if (extension.equals("wav", true)) "audio/wav" else "audio/mp4")
-                    .setCustomMetadata("organizationId", orgId)
-                    .setCustomMetadata("ownerUid", user.uid)
-                    .build()
-                storageRef.putFile(Uri.fromFile(localFile), metadata).await()
-                audioReference = storageRef.downloadUrl.await().toString()
-            }
+            val extension = localFile.extension.ifBlank { "m4a" }
+            val storageRef = FirebaseStorage.getInstance().reference
+                .child("organizations/" + orgId + "/voice/voice_" + note.truckId + "_" + note.timestamp + "." + extension)
+            val metadata = StorageMetadata.Builder()
+                .setContentType(if (extension.equals("wav", true)) "audio/wav" else "audio/mp4")
+                .setCustomMetadata("organizationId", orgId)
+                .setCustomMetadata("ownerUid", user.uid)
+                .build()
+            storageRef.putFile(Uri.fromFile(localFile), metadata).await()
+            val audioReference = storageRef.downloadUrl.await().toString()
             val data = hashMapOf(
                 "id" to note.id,
                 "truckId" to note.truckId,
