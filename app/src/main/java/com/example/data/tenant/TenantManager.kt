@@ -15,6 +15,11 @@ import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.security.SecureRandom
 import java.security.MessageDigest
+import kotlinx.coroutines.flow.first
+import com.example.data.model.AttendanceRecord
+import com.example.data.model.LocationPoint
+import com.example.data.model.StopRecord
+import com.example.data.model.VoiceDeliveryNote
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
@@ -168,6 +173,32 @@ object TenantManager {
 
         rememberMembership(context, orgRef.id, "manager", businessName.trim(), code)
         prefs(context).edit().putString(KEY_PIN_SALT, salt).putString(KEY_PIN_HASH, hash).apply()
+
+        // Carry forward the locally available pilot fleet into the new first business workspace.
+        val dao = com.example.data.db.AppDatabase.getDatabase(context).fleetDao()
+        val sync = com.example.data.firebase.FirestoreSyncManager(context)
+        val legacyTrucks = dao.getAllTrucks().first()
+        legacyTrucks.forEach { truck ->
+            sync.syncTruck(truck)
+            firestore(context).collection("organizations").document(orgRef.id)
+                .collection("truck_subscriptions").document(truck.id.toString())
+                .set(mapOf(
+                    "truckId" to truck.id,
+                    "amountPaise" to 0,
+                    "currency" to "INR",
+                    "billingPeriod" to "monthly",
+                    "mode" to "legacy_import",
+                    "status" to "legacy_active",
+                    "startedAt" to now,
+                    "createdBy" to user.uid
+                )).await()
+        }
+        dao.getAllDrivers().first().forEach { sync.syncDriver(it) }
+        dao.getLocationsSince(now - 30L * 24L * 60L * 60L * 1000L).first()
+            .chunked(450).forEach { sync.syncLocationBatch(it) }
+        dao.getAllStops().first().chunked(450).forEach { sync.syncStopBatch(it) }
+        dao.getAllAttendance().first().forEach { sync.syncAttendance(it) }
+        dao.getAllVoiceNotes().first().forEach { sync.syncVoiceNote(it) }
         return code
     }
 
@@ -250,10 +281,25 @@ object TenantManager {
 
     suspend fun refreshFleetCache(context: Context) {
         val orgId = organizationId(context) ?: return
+        val uid = Firebase.auth.currentUser?.uid ?: return
+        val memberRole = role(context) ?: return
+        val isManager = memberRole == "manager"
+        val member = firestore(context).collection("organizations").document(orgId)
+            .collection("members").document(uid).get().await()
+        val assignedId = member.getLong("assignedTruckId")?.toInt() ?: assignedTruckId(context)
         val dao = com.example.data.db.AppDatabase.getDatabase(context).fleetDao()
         val root = firestore(context).collection("organizations").document(orgId)
 
-        root.collection("trucks").get().await().documents.forEach { doc ->
+        val truckDocs = if (isManager) {
+            root.collection("trucks").get().await().documents
+        } else if (assignedId != null && assignedId > 0) {
+            val truck = root.collection("trucks").document("truck_$assignedId").get().await()
+            if (truck.exists()) listOf(truck) else emptyList()
+        } else {
+            emptyList()
+        }
+
+        truckDocs.forEach { doc ->
             val id = (doc.getLong("id") ?: doc.id.removePrefix("truck_").toLongOrNull() ?: return@forEach).toInt()
             dao.insertTruck(com.example.data.model.TruckEntity(
                 id = id,
@@ -270,7 +316,12 @@ object TenantManager {
             ))
         }
 
-        root.collection("drivers").get().await().documents.forEach { doc ->
+        val driverDocs = if (isManager) {
+            root.collection("drivers").get().await().documents
+        } else {
+            root.collection("drivers").whereEqualTo("uid", uid).limit(1).get().await().documents
+        }
+        driverDocs.forEach { doc ->
             val id = doc.getLong("id") ?: doc.id.removePrefix("driver_").toLongOrNull()
                 ?: doc.getString("uid")?.hashCode()?.toLong()?.let { kotlin.math.abs(it) } ?: return@forEach
             dao.insertDriver(com.example.data.model.DriverEntity(
@@ -283,7 +334,94 @@ object TenantManager {
                 earlyLogoutEnabled = doc.getBoolean("earlyLogoutEnabled") ?: false
             ))
         }
+
+        val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
+        var locationsQuery = root.collection("location_points").whereGreaterThanOrEqualTo("timestamp", cutoff)
+        if (!isManager && assignedId != null) locationsQuery = locationsQuery.whereEqualTo("truckId", assignedId)
+        locationsQuery.get().await().documents.forEach { doc ->
+            val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
+            val timestamp = doc.getLong("timestamp") ?: return@forEach
+            val localId = stableLocalRecordId(truckId, timestamp)
+            dao.insertLocationPoint(LocationPoint(
+                id = localId,
+                truckId = truckId,
+                latitude = doc.getDouble("latitude") ?: 0.0,
+                longitude = doc.getDouble("longitude") ?: 0.0,
+                speedKmh = (doc.getDouble("speedKmh") ?: 0.0).toFloat(),
+                accuracyMeters = (doc.getDouble("accuracyMeters") ?: 5.0).toFloat(),
+                timestamp = timestamp,
+                isSynced = true
+            ))
+        }
+
+        val stopCollection = root.collection("stop_records")
+        val stopSnapshot = if (isManager) stopCollection.get().await()
+            else if (assignedId != null) stopCollection.whereEqualTo("truckId", assignedId).get().await()
+            else null
+        stopSnapshot?.documents?.forEach { doc ->
+            val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
+            val startTime = doc.getLong("startTime") ?: return@forEach
+            dao.insertStop(StopRecord(
+                id = stableLocalRecordId(truckId, startTime),
+                truckId = truckId,
+                latitude = doc.getDouble("latitude") ?: 0.0,
+                longitude = doc.getDouble("longitude") ?: 0.0,
+                startTime = startTime,
+                endTime = doc.getLong("endTime") ?: startTime,
+                durationMinutes = (doc.getLong("durationMinutes") ?: 0L).toInt(),
+                addressOrLabel = doc.getString("addressOrLabel") ?: "",
+                category = doc.getString("category") ?: "Delivery Stop",
+                isSynced = true
+            ))
+        }
+
+        val voiceCollection = root.collection("voice_delivery_notes")
+        val voiceSnapshot = if (isManager) voiceCollection.get().await()
+            else if (assignedId != null) voiceCollection.whereEqualTo("truckId", assignedId).get().await()
+            else null
+        voiceSnapshot?.documents?.forEach { doc ->
+            val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
+            val timestamp = doc.getLong("timestamp") ?: return@forEach
+            val audioPath = doc.getString("audioFilePath") ?: ""
+            dao.insertVoiceNote(VoiceDeliveryNote(
+                id = stableLocalRecordId(truckId, timestamp),
+                truckId = truckId,
+                driverName = doc.getString("driverName") ?: "",
+                audioFilePath = audioPath,
+                durationSeconds = (doc.getLong("durationSeconds") ?: 0L).toInt(),
+                latitude = doc.getDouble("latitude") ?: 0.0,
+                longitude = doc.getDouble("longitude") ?: 0.0,
+                locationLabel = doc.getString("locationLabel") ?: "Water Delivery Site",
+                timestamp = timestamp,
+                isSynced = true
+            ))
+        }
+
+        val attendanceCollection = root.collection("attendance")
+        val attendanceSnapshot = if (isManager) attendanceCollection.get().await()
+            else if (assignedId != null) attendanceCollection.whereEqualTo("truckId", assignedId).get().await()
+            else null
+        attendanceSnapshot?.documents?.forEach { doc ->
+            val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
+            val checkInTime = doc.getLong("checkInTime") ?: return@forEach
+            val checkOut = doc.getLong("checkOutTime") ?: 0L
+            dao.insertAttendance(AttendanceRecord(
+                id = stableLocalRecordId(truckId, checkInTime),
+                truckId = truckId,
+                driverName = doc.getString("driverName") ?: "",
+                selfieUri = doc.getString("selfieUri")?.takeIf { it.isNotBlank() },
+                checkInTime = checkInTime,
+                checkOutTime = checkOut.takeIf { it > 0L },
+                checkInLat = doc.getDouble("checkInLat") ?: 0.0,
+                checkInLng = doc.getDouble("checkInLng") ?: 0.0,
+                isCompleted = doc.getBoolean("isCompleted") ?: (checkOut > 0L)
+            ))
+        }
     }
+
+    private fun stableLocalRecordId(truckId: Int, timestamp: Long): Long =
+        truckId.toLong().coerceAtLeast(0L) * 3_000_000_000_000L +
+            (timestamp % 3_000_000_000_000L)
 
     suspend fun assignDriverToTruck(context: Context, driver: com.example.data.model.DriverEntity, truckId: Int) {
         require(truckId > 0) { "Select a valid truck." }
