@@ -157,6 +157,7 @@ fun DriverPortalScreen(
 
     // Voice recording & playback state
     val isRecording by viewModel.audioRecorder.isRecording.collectAsState()
+    val voiceUploadStatus by viewModel.voiceUploadStatus.collectAsState()
     val recordDurationSec by viewModel.audioRecorder.recordingDurationSec.collectAsState()
     val voiceNotes by viewModel.selectedTruckVoiceNotes.collectAsState()
     val playingPath by viewModel.audioPlayer.currentlyPlayingPath.collectAsState()
@@ -773,6 +774,20 @@ fun DriverPortalScreen(
                                             )
                                         }
                                     }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                if (voiceUploadStatus != "Idle") {
+                                    Text(
+                                        text = voiceUploadStatus,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = when {
+                                            voiceUploadStatus.startsWith("Uploaded") -> StatusActiveGreen
+                                            voiceUploadStatus.startsWith("Upload pending") -> StatusAmberWarning
+                                            else -> CyanWater
+                                        },
+                                        textAlign = TextAlign.Center
+                                    )
                                 }
 
                                 Spacer(modifier = Modifier.height(16.dp))
