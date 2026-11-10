@@ -39,6 +39,32 @@ jobs:
         with:
           packages: 'platforms;android-36.1 build-tools;36.1.0'
 
+      - name: Restore Firebase configuration
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "::error::Missing repository secret GOOGLE_SERVICES_JSON_BASE64. Add the base64-encoded google-services.json in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app/google-services.json
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          config = json.loads(Path("app/google-services.json").read_text())
+          clients = config.get("client", [])
+          package_names = {
+              client.get("client_info", {}).get("android_client_info", {}).get("package_name")
+              for client in clients
+          }
+          if "com.aistudio.aquatrack.wtrsrv" not in package_names:
+              raise SystemExit("Firebase config package name does not match the Android applicationId.")
+          print("Firebase config restored and Android package name validated.")
+          PY
+
       # The project build.gradle.kts explicitly references this local debug keystore.
       # Generate it on the ephemeral GitHub runner; do not commit it to the repository.
       - name: Generate temporary debug keystore
@@ -52,20 +78,6 @@ jobs:
             -keysize 2048 \
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
-
-      # The private Firebase web client ID is not committed to this repository.
-      # Add a build-only placeholder when google-services.json is unavailable.
-      # This makes the CI APK compile; Google Sign-In still needs a real client ID.
-      - name: Provide CI-only Google Sign-In resource
-        run: |
-          if [ ! -f app/google-services.json ]; then
-            mkdir -p app/src/debug/res/values
-            cat > app/src/debug/res/values/google_services_ci.xml <<'EOF'
-          <resources>
-              <string name="default_web_client_id" translatable="false">ci-placeholder.apps.googleusercontent.com</string>
-          </resources>
-          EOF
-          fi
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v6
