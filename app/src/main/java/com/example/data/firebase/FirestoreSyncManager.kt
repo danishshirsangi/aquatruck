@@ -139,12 +139,20 @@ class FirestoreSyncManager(private val context: Context) {
         }
     }
 
-    suspend fun deleteDriver(driverId: Long) {
+    suspend fun deleteDriver(driver: DriverEntity) {
         if (auth.currentUser == null) return
         try {
-            collection("drivers").document("driver_$driverId").delete().await()
+            val batch = firestore.batch()
+            batch.delete(collection("drivers").document("driver_${driver.id}"))
+            driver.invitationCode?.takeIf { it.isNotBlank() }?.let { code ->
+                batch.delete(firestore.collection("driver_invitations").document(code))
+            }
+            driver.userUid?.takeIf { it.isNotBlank() }?.let { uid ->
+                batch.delete(collection("members").document(uid))
+            }
+            batch.commit().await()
         } catch (e: Exception) {
-            Log.w("FirestoreSync", "Error deleting driver: ${e.message}")
+            Log.w("FirestoreSync", "Error deleting driver: ${e.message}", e)
         }
     }
 
