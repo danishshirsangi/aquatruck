@@ -71,6 +71,7 @@ class LocationTrackingService : Service() {
     private var anchorLat: Double = 0.0
     private var anchorLng: Double = 0.0
     private var anchorStartTime: Long = 0L
+    private var anchorTruckId: Int? = null
     private var hasLoggedCurrentDropPoint: Boolean = false
 
     private val sessionPrefs by lazy {
@@ -236,6 +237,7 @@ class LocationTrackingService : Service() {
         anchorLat = 0.0
         anchorLng = 0.0
         anchorStartTime = 0L
+        anchorTruckId = activeTruckId
         hasLoggedCurrentDropPoint = false
         isTracking = true
 
@@ -303,6 +305,16 @@ class LocationTrackingService : Service() {
         val speedKmh = location.speed * 3.6f
         val now = location.time.takeIf { it > 0L } ?: System.currentTimeMillis()
         val dao = AppDatabase.getDatabase(applicationContext).fleetDao()
+
+        // Keep automatic stop detection isolated by tanker, even when callbacks
+        // already queued for the previous tanker are drained after a switch.
+        if (anchorTruckId != truckId) {
+            anchorTruckId = truckId
+            anchorLat = 0.0
+            anchorLng = 0.0
+            anchorStartTime = 0L
+            hasLoggedCurrentDropPoint = false
+        }
 
         // Local persistence always completes before any network scheduling or upload.
         dao.insertLocationPoint(
