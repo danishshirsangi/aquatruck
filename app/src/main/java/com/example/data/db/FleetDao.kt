@@ -71,9 +71,6 @@ interface FleetDao {
     suspend fun updateAttendance(record: AttendanceRecord)
 
     // Location Points
-    @Query("SELECT * FROM location_points WHERE truckId = :truckId ORDER BY timestamp ASC")
-    fun getLocationsForTruck(truckId: Int): Flow<List<LocationPoint>>
-
     @Query("SELECT * FROM location_points WHERE truckId = :truckId AND timestamp >= :sinceTimestamp ORDER BY timestamp ASC")
     fun getLocationsForTruckSince(truckId: Int, sinceTimestamp: Long): Flow<List<LocationPoint>>
 
@@ -88,9 +85,6 @@ interface FleetDao {
 
     @Query("SELECT * FROM location_points WHERE truckId = :truckId ORDER BY timestamp DESC LIMIT 100")
     suspend fun getRecentLocationsDirect(truckId: Int): List<LocationPoint>
-
-    @Query("SELECT * FROM location_points ORDER BY timestamp ASC")
-    fun getAllRecentLocations(): Flow<List<LocationPoint>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLocationPoint(point: LocationPoint): Long
