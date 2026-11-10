@@ -25,8 +25,10 @@ data class DriverEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val phone: String = "",
-    val assignedTruckId: Int = 1,
-    val createdAt: Long = System.currentTimeMillis()
+    val assignedTruckId: Int = 0,
+    val createdAt: Long = System.currentTimeMillis(),
+    val userUid: String? = null,
+    val earlyLogoutEnabled: Boolean = false
 )
 
 @Entity(tableName = "attendance")

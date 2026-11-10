@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.security.SecureRandom
+import java.security.MessageDigest
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
@@ -33,6 +34,7 @@ object TenantManager {
     private const val KEY_BUSINESS_CODE = "business_code"
     private const val KEY_PIN_SALT = "manager_pin_salt"
     private const val KEY_PIN_HASH = "manager_pin_hash"
+    private const val KEY_ASSIGNED_TRUCK_ID = "assigned_truck_id"
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -44,17 +46,21 @@ object TenantManager {
     fun role(context: Context): String? = prefs(context).getString(KEY_ROLE, null)
     fun businessName(context: Context): String? = prefs(context).getString(KEY_BUSINESS_NAME, null)
     fun businessCode(context: Context): String? = prefs(context).getString(KEY_BUSINESS_CODE, null)
+    fun assignedTruckId(context: Context): Int? =
+        prefs(context).getInt(KEY_ASSIGNED_TRUCK_ID, 0).takeIf { it > 0 }
 
     fun hasActiveOrganization(context: Context): Boolean =
         !organizationId(context).isNullOrBlank() && !role(context).isNullOrBlank()
 
-    private fun rememberMembership(context: Context, orgId: String, memberRole: String, name: String, code: String? = null) {
+    private fun rememberMembership(context: Context, orgId: String, memberRole: String, name: String, code: String? = null, assignedTruckId: Int? = null) {
         prefs(context).edit()
             .putString(KEY_ORG, orgId)
             .putString(KEY_ROLE, memberRole)
             .putString(KEY_BUSINESS_NAME, name)
             .apply {
                 if (code != null) putString(KEY_BUSINESS_CODE, code)
+                if (assignedTruckId != null) putInt(KEY_ASSIGNED_TRUCK_ID, assignedTruckId)
+                else remove(KEY_ASSIGNED_TRUCK_ID)
             }
             .apply()
     }
@@ -67,7 +73,11 @@ object TenantManager {
             val memberRole = snapshot.getString("role") ?: return false
             val name = snapshot.getString("businessName") ?: "My Business"
             if (memberRole !in setOf("manager", "driver")) return false
-            rememberMembership(context, orgId, memberRole, name)
+            val member = firestore(context).collection("organizations").document(orgId)
+                .collection("members").document(user.uid).get().await()
+            if (!member.exists() || member.getString("status") != "active") return false
+            val assignedTruck = member.getLong("assignedTruckId")?.toInt()
+            rememberMembership(context, orgId, memberRole, name, assignedTruckId = assignedTruck)
             if (memberRole == "manager") loadManagerPin(context, orgId, user.uid)
             true
         } catch (_: Exception) {
@@ -180,43 +190,57 @@ object TenantManager {
             throw IllegalStateException("This Google account is already assigned to another business.")
         }
 
+        require(phone.isNotBlank()) { "Enter the phone number registered by your manager." }
+        val invitationId = hashPhone(phone)
+        val orgRef = db.collection("organizations").document(orgId)
+        val invitationRef = orgRef.collection("driver_invitations").document(invitationId)
+        val invitation = invitationRef.get().await()
+        if (!invitation.exists() || invitation.getBoolean("active") != true) {
+            throw IllegalArgumentException("No active driver invitation matches this phone number. Ask the manager to register you first.")
+        }
+        if (!invitation.getString("uid").isNullOrBlank()) {
+            throw IllegalStateException("This driver invitation has already been claimed.")
+        }
+        val assignedTruckId = (invitation.getLong("assignedTruckId") ?: 0L).toInt()
+        if (assignedTruckId <= 0) {
+            throw IllegalStateException("The manager must assign a truck before this driver can join.")
+        }
+        val driverId = invitation.getLong("driverId")
+            ?: throw IllegalStateException("Driver invitation is missing its driver profile.")
+        val driverRef = orgRef.collection("drivers").document("driver_" + driverId)
         val now = System.currentTimeMillis()
-        val rawId = user.uid.hashCode().toLong()
-        val numericId = (if (rawId == Long.MIN_VALUE) 1L else kotlin.math.abs(rawId)).coerceAtLeast(1L)
-        val driverRef = db.collection("organizations").document(orgId)
-            .collection("drivers").document("driver_" + user.uid)
         val batch = db.batch()
-        batch.set(db.collection("organizations").document(orgId).collection("members").document(user.uid), mapOf(
+        batch.update(invitationRef, mapOf("uid" to user.uid, "claimedAt" to now, "active" to false))
+        batch.update(driverRef, mapOf(
+            "uid" to user.uid,
+            "name" to (invitation.getString("name") ?: driverName.trim()),
+            "phone" to phone.trim(),
+            "assignedTruckId" to assignedTruckId,
+            "status" to "active"
+        ))
+        batch.set(orgRef.collection("members").document(user.uid), mapOf(
             "uid" to user.uid,
             "role" to "driver",
-            "name" to driverName.trim(),
+            "name" to (invitation.getString("name") ?: driverName.trim()),
             "phone" to phone.trim(),
-            "assignedTruckId" to 1,
+            "assignedTruckId" to assignedTruckId,
+            "earlyLogoutEnabled" to false,
             "status" to "active",
             "createdAt" to now,
             "invitationCode" to code
-        ))
-        batch.set(driverRef, mapOf(
-            "id" to numericId,
-            "uid" to user.uid,
-            "name" to driverName.trim(),
-            "phone" to phone.trim(),
-            "assignedTruckId" to 1,
-            "createdAt" to now,
-            "status" to "active"
         ))
         batch.set(db.collection("users").document(user.uid), mapOf(
             "uid" to user.uid,
             "organizationId" to orgId,
             "role" to "driver",
             "businessName" to businessName,
-            "displayName" to driverName.trim(),
+            "displayName" to (invitation.getString("name") ?: driverName.trim()),
             "phone" to phone.trim(),
             "updatedAt" to now
         ))
         batch.commit().await()
 
-        rememberMembership(context, orgId, "driver", businessName, code)
+        rememberMembership(context, orgId, "driver", businessName, code, assignedTruckId)
         refreshFleetCache(context)
         return businessName
     }
@@ -250,10 +274,70 @@ object TenantManager {
                 id = id.coerceAtLeast(1L),
                 name = doc.getString("name") ?: "Driver",
                 phone = doc.getString("phone") ?: "",
-                assignedTruckId = (doc.getLong("assignedTruckId") ?: 1L).toInt(),
-                createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
+                assignedTruckId = (doc.getLong("assignedTruckId") ?: 0L).toInt(),
+                createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis(),
+                userUid = doc.getString("uid"),
+                earlyLogoutEnabled = doc.getBoolean("earlyLogoutEnabled") ?: false
             ))
         }
+    }
+
+    suspend fun assignDriverToTruck(context: Context, driver: com.example.data.model.DriverEntity, truckId: Int) {
+        require(truckId > 0) { "Select a valid truck." }
+        val orgId = organizationId(context) ?: throw IllegalStateException("Business not selected.")
+        check(role(context) == "manager") { "Only a manager can assign drivers." }
+        val root = firestore(context).collection("organizations").document(orgId)
+        val batch = firestore(context).batch()
+        val driverRef = root.collection("drivers").document("driver_" + driver.id)
+        batch.set(driverRef, mapOf(
+            "assignedTruckId" to truckId,
+            "earlyLogoutEnabled" to driver.earlyLogoutEnabled
+        ), com.google.firebase.firestore.SetOptions.merge())
+        driver.userUid?.let { uid ->
+            batch.set(root.collection("members").document(uid), mapOf("assignedTruckId" to truckId),
+                com.google.firebase.firestore.SetOptions.merge())
+        }
+        batch.commit().await()
+    }
+
+    suspend fun setDriverEarlyLogout(context: Context, driver: com.example.data.model.DriverEntity, enabled: Boolean) {
+        val orgId = organizationId(context) ?: throw IllegalStateException("Business not selected.")
+        check(role(context) == "manager") { "Only a manager can change driver permissions." }
+        val root = firestore(context).collection("organizations").document(orgId)
+        val batch = firestore(context).batch()
+        batch.set(root.collection("drivers").document("driver_" + driver.id),
+            mapOf("earlyLogoutEnabled" to enabled), com.google.firebase.firestore.SetOptions.merge())
+        driver.userUid?.let { uid ->
+            batch.set(root.collection("members").document(uid),
+                mapOf("earlyLogoutEnabled" to enabled), com.google.firebase.firestore.SetOptions.merge())
+        }
+        batch.commit().await()
+    }
+
+    fun observeOwnEarlyLogout(context: Context): Flow<Boolean> = callbackFlow {
+        val uid = Firebase.auth.currentUser?.uid
+        val orgId = organizationId(context)
+        if (uid.isNullOrBlank() || orgId.isNullOrBlank() || role(context) != "driver") {
+            trySend(false)
+            close()
+            return@callbackFlow
+        }
+        val listener = firestore(context).collection("organizations").document(orgId)
+            .collection("members").document(uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                trySend(snapshot?.getBoolean("earlyLogoutEnabled") ?: false)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    private fun hashPhone(phone: String): String {
+        val normalized = phone.filter { it.isDigit() }
+        val digest = MessageDigest.getInstance("SHA-256").digest(normalized.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     suspend fun saveShiftPolicy(context: Context, policy: DriverShiftPolicy) {

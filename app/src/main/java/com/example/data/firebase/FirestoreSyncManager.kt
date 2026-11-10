@@ -32,9 +32,8 @@ class FirestoreSyncManager(private val context: Context) {
     private fun collection(name: String): CollectionReference {
         val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
             .getString("organization_id", null)
-        return if (orgId.isNullOrBlank()) firestore.collection(name) else {
-            firestore.collection("organizations").document(orgId).collection(name)
-        }
+        check(!orgId.isNullOrBlank()) { "No business membership is configured; refusing to write to global fleet collections." }
+        return firestore.collection("organizations").document(orgId).collection(name)
     }
 
     suspend fun recordTestTruckSubscription(truckId: Int): Boolean {
@@ -105,11 +104,27 @@ class FirestoreSyncManager(private val context: Context) {
                 "name" to driver.name,
                 "phone" to driver.phone,
                 "assignedTruckId" to driver.assignedTruckId,
-                "createdAt" to driver.createdAt
+                "createdAt" to driver.createdAt,
+                "uid" to (driver.userUid ?: ""),
+                "earlyLogoutEnabled" to driver.earlyLogoutEnabled
             )
             collection("drivers").document("driver_${driver.id}")
                 .set(data, SetOptions.merge())
                 .await()
+            val normalizedPhone = driver.phone.filter { it.isDigit() }
+            if (normalizedPhone.isNotBlank()) {
+                val phoneHash = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(normalizedPhone.toByteArray(Charsets.UTF_8))
+                    .joinToString("") { "%02x".format(it) }
+                collection("driver_invitations").document(phoneHash).set(mapOf(
+                    "driverId" to driver.id,
+                    "name" to driver.name,
+                    "phoneLastFour" to normalizedPhone.takeLast(4),
+                    "assignedTruckId" to driver.assignedTruckId,
+                    "active" to (driver.userUid.isNullOrBlank()),
+                    "createdAt" to driver.createdAt
+                ), SetOptions.merge()).await()
+            }
         } catch (e: Exception) {
             Log.w("FirestoreSync", "Error syncing driver: ${e.message}")
         }
@@ -122,6 +137,10 @@ class FirestoreSyncManager(private val context: Context) {
         } catch (e: Exception) {
             Log.w("FirestoreSync", "Error deleting driver: ${e.message}")
         }
+    }
+
+    suspend fun updateDriver(driver: DriverEntity) {
+        syncDriver(driver)
     }
 
     suspend fun syncAttendance(record: AttendanceRecord) {

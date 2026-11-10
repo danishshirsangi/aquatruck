@@ -81,9 +81,28 @@ service cloud.firestore {
 
       match /drivers/{driverId} {
         allow read: if isManager(orgId) || (isMember(orgId) && resource.data.uid == request.auth.uid);
-        allow create: if isManager(orgId) || (signedIn() && request.resource.data.uid == request.auth.uid
-          && request.resource.data.status == "active");
-        allow update, delete: if isManager(orgId);
+        allow create: if isManager(orgId);
+        allow update: if isManager(orgId) || (
+          signedIn()
+          && resource.data.uid == ""
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["uid", "status", "name", "phone", "assignedTruckId"])
+        );
+        allow delete: if isManager(orgId);
+      }
+
+      match /driver_invitations/{invitationId} {
+        allow get: if signedIn();
+        allow list: if isManager(orgId);
+        allow create, delete: if isManager(orgId);
+        allow update: if isManager(orgId) || (
+          signedIn()
+          && resource.data.active == true
+          && !("uid" in resource.data)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.active == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["uid", "claimedAt", "active"])
+        );
       }
 
       match /truck_subscriptions/{truckId} {
