@@ -14,6 +14,8 @@ import com.example.data.model.StopRecord
 import com.example.data.model.TruckEntity
 import com.example.data.model.VoiceDeliveryNote
 import com.example.data.sync.LocationSyncScheduler
+import com.example.data.tenant.DriverShiftPolicy
+import com.example.data.tenant.TenantManager
 import com.example.service.LocationTrackingService
 import com.example.util.AudioPlayerManager
 import com.example.util.AudioRecorderManager
@@ -203,6 +205,10 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     val allDeliveryProofs: StateFlow<List<DeliveryProof>> = dao.getAllProofs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val _shiftPolicy = MutableStateFlow(DriverShiftPolicy())
+    val shiftPolicy: StateFlow<DriverShiftPolicy> = _shiftPolicy.asStateFlow()
+    private var shiftPolicyJob: Job? = null
+
     private val _currentRole = MutableStateFlow(UserRole.DRIVER)
     val currentRole: StateFlow<UserRole> = _currentRole.asStateFlow()
 
@@ -254,12 +260,28 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun refreshTenantContext() {
+        shiftPolicyJob?.cancel()
+        shiftPolicyJob = viewModelScope.launch {
+            TenantManager.observeShiftPolicy(getApplication()).collect { _shiftPolicy.value = it }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { TenantManager.refreshFleetCache(getApplication()) }
+        }
+    }
+
+    fun saveShiftPolicy(policy: DriverShiftPolicy) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { TenantManager.saveShiftPolicy(getApplication(), policy) }
+        }
+    }
+
     fun setRole(role: UserRole) {
         _currentRole.value = role
     }
 
     fun unlockManager(pin: String): Boolean {
-        return if (pin == "1234") {
+        return if (TenantManager.verifyManagerPin(getApplication(), pin)) {
             _isManagerUnlocked.value = true
             _currentRole.value = UserRole.MANAGER
             true
@@ -441,7 +463,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun verifyManagerPin(pin: String): Boolean {
-        return pin.trim() == "1234"
+        return TenantManager.verifyManagerPin(getApplication(), pin)
     }
 
     fun startVoiceDeliveryRecording(): Boolean {
@@ -501,8 +523,8 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 locationLabel = locationLabel,
                 timestamp = now
             )
-            val noteId = dao.insertVoiceNote(note)
-            firestoreSync.syncVoiceNote(note.copy(id = noteId))
+            dao.insertVoiceNote(note)
+            LocationSyncScheduler.enqueue(context)
 
             // Save Stop Record
             val stop = StopRecord(
@@ -515,7 +537,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 addressOrLabel = "Water Delivery: $locationLabel",
                 category = "Delivery Stop"
             )
-            val stopId = dao.insertStop(stop)
+            dao.insertStop(stop)
             LocationSyncScheduler.enqueue(context)
         }
     }

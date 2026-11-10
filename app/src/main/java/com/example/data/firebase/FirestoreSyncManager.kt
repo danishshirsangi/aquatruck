@@ -138,7 +138,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "checkInLng" to record.checkInLng,
                 "isCompleted" to record.isCompleted
             )
-            collection("attendance").document("att_${record.id}")
+            collection("attendance").document("att_${record.truckId}_${record.checkInTime}")
                 .set(data, SetOptions.merge())
                 .await()
         } catch (e: Exception) {
@@ -146,8 +146,8 @@ class FirestoreSyncManager(private val context: Context) {
         }
     }
 
-    suspend fun syncVoiceNote(note: VoiceDeliveryNote) {
-        if (auth.currentUser == null) return
+    suspend fun syncVoiceNote(note: VoiceDeliveryNote): Boolean {
+        if (auth.currentUser == null) return false
         try {
             var audioReference = note.audioFilePath
             val localFile = File(note.audioFilePath)
@@ -157,7 +157,7 @@ class FirestoreSyncManager(private val context: Context) {
             if (localFile.exists() && !orgId.isNullOrBlank() && user != null) {
                 val extension = localFile.extension.ifBlank { "m4a" }
                 val storageRef = FirebaseStorage.getInstance().reference
-                    .child("organizations/" + orgId + "/voice/voice_" + note.id + "." + extension)
+                    .child("organizations/" + orgId + "/voice/voice_" + note.truckId + "_" + note.timestamp + "." + extension)
                 val metadata = StorageMetadata.Builder()
                     .setContentType(if (extension.equals("wav", true)) "audio/wav" else "audio/mp4")
                     .setCustomMetadata("organizationId", orgId)
@@ -177,11 +177,12 @@ class FirestoreSyncManager(private val context: Context) {
                 "locationLabel" to note.locationLabel,
                 "timestamp" to note.timestamp
             )
-            collection("voice_delivery_notes").document("voice_${note.id}")
+            collection("voice_delivery_notes").document("voice_${note.truckId}_${note.timestamp}")
                 .set(data, SetOptions.merge())
                 .await()
         } catch (e: Exception) {
             Log.w("FirestoreSync", "Error syncing voice note: ${e.message}")
+            false
         }
     }
 
@@ -195,7 +196,8 @@ class FirestoreSyncManager(private val context: Context) {
                 "longitude" to point.longitude,
                 "speedKmh" to point.speedKmh,
                 "accuracyMeters" to point.accuracyMeters,
-                "timestamp" to point.timestamp
+                "timestamp" to point.timestamp,
+                "expireAt" to java.util.Date(point.timestamp + 30L * 24L * 60L * 60L * 1000L)
             )
             collection("location_points").document("loc_${point.truckId}_${point.timestamp}")
                 .set(data, SetOptions.merge())
@@ -223,7 +225,8 @@ class FirestoreSyncManager(private val context: Context) {
                         "longitude" to point.longitude,
                         "speedKmh" to point.speedKmh,
                         "accuracyMeters" to point.accuracyMeters,
-                        "timestamp" to point.timestamp
+                        "timestamp" to point.timestamp,
+                        "expireAt" to java.util.Date(point.timestamp + 30L * 24L * 60L * 60L * 1000L)
                     )
                     batch.set(
                         collection("location_points")
@@ -255,7 +258,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "addressOrLabel" to stop.addressOrLabel,
                 "category" to stop.category
             )
-            collection("stop_records").document("stop_${stop.id}")
+            collection("stop_records").document("stop_${stop.truckId}_${stop.startTime}")
                 .set(data, SetOptions.merge())
                 .await()
             true
@@ -288,7 +291,7 @@ class FirestoreSyncManager(private val context: Context) {
                         "category" to stop.category
                     )
                     batch.set(
-                        collection("stop_records").document("stop_${stop.id}"),
+                        collection("stop_records").document("stop_${stop.truckId}_${stop.startTime}"),
                         data,
                         SetOptions.merge()
                     )
@@ -315,7 +318,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "delivery_proofs"
             )
             for (colName in collections) {
-                val snapshot = firestore.collection(colName).get().await()
+                val snapshot = collection(colName).get().await()
                 for (doc in snapshot.documents) {
                     doc.reference.delete().await()
                 }

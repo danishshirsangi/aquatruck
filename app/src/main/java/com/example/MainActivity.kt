@@ -87,6 +87,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    LaunchedEffect(tenantReady) {
+                        if (tenantReady) fleetViewModel.refreshTenantContext()
+                    }
+
                     if (currentUser == null) {
                         AuthScreen(
                             onAuthSuccess = {

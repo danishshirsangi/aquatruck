@@ -94,7 +94,9 @@ data class VoiceDeliveryNote(
     val latitude: Double,
     val longitude: Double,
     val locationLabel: String = "Water Delivery Site",
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val retryCount: Int = 0
 )
 
 @Entity(tableName = "delivery_proofs")
