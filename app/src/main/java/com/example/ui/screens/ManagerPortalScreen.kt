@@ -64,6 +64,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -97,6 +99,7 @@ fun ManagerPortalScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val trucks by viewModel.allTrucks.collectAsState()
     val drivers by viewModel.allDrivers.collectAsState()
     val allStops by viewModel.allStops.collectAsState()
@@ -589,6 +592,29 @@ private fun FleetOverviewTab(
                             IconButton(onClick = { onDeleteTruck(truck.id) }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.outline)
                             }
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Registered drivers (${drivers.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                if (drivers.isEmpty()) {
+                    Text("No drivers added yet. Tap Add Driver to register your first driver.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        items(drivers) { driver ->
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(driver.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(driver.phone.ifBlank { "No phone number added" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (driver.userUid.isNullOrBlank()) "Waiting for driver to join" else "Account linked", style = MaterialTheme.typography.labelSmall, color = StatusActiveGreen)
+                    if (driver.userUid.isNullOrBlank() && !driver.invitationCode.isNullOrBlank()) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Code: ${driver.invitationCode}", fontWeight = FontWeight.Bold)
+                            TextButton(onClick = { clipboard.setText(AnnotatedString(driver.invitationCode!!)) }) { Text("Copy code") }
                         }
                     }
                 }
