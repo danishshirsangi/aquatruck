@@ -43,9 +43,12 @@ import kotlin.math.sqrt
 
 class LocationTrackingService : Service() {
 
-    // A single consumer serializes GPS samples and avoids one coroutine per callback.
+    private data class TrackingSample(val truckId: Int, val location: Location)
+
+    // A single consumer serializes GPS samples and keeps each sample attached to the
+    // tanker that was active when Android delivered that GPS callback.
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val locationChannel = Channel<Location>(Channel.UNLIMITED)
+    private val locationChannel = Channel<TrackingSample>(Channel.UNLIMITED)
     private var locationProcessorJob: Job? = null
     private var liveTruckSyncJob: Job? = null
 
@@ -123,7 +126,7 @@ class LocationTrackingService : Service() {
                 // Sort a delivered batch before enqueueing it, preserving chronological order.
                 result.locations.sortedBy { it.time }.forEach { location ->
                     if (location.latitude != 0.0 || location.longitude != 0.0) {
-                        val queued = locationChannel.trySend(Location(location))
+                        val queued = locationChannel.trySend(TrackingSample(activeTruckId, Location(location)))
                         if (queued.isFailure) {
                             Log.w("LocationTrackingService", "Location queue is closed; sample was not queued.")
                         }
@@ -133,10 +136,10 @@ class LocationTrackingService : Service() {
         }
 
         locationProcessorJob = serviceScope.launch {
-            for (location in locationChannel) {
+            for (sample in locationChannel) {
                 try {
-                    updateTrackingMode(location)
-                    handleNewLocation(location)
+                    updateTrackingMode(sample.location)
+                    handleNewLocation(sample.location, sample.truckId)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -230,6 +233,10 @@ class LocationTrackingService : Service() {
         currentIntervalMillis = 0L
         currentPriority = -1
         lastNotificationStatus = null
+        anchorLat = 0.0
+        anchorLng = 0.0
+        anchorStartTime = 0L
+        hasLoggedCurrentDropPoint = false
         isTracking = true
 
         requestLocationUpdates(MOVING_INTERVAL_MS, Priority.PRIORITY_HIGH_ACCURACY)
@@ -285,8 +292,12 @@ class LocationTrackingService : Service() {
         previousLocation = Location(location)
     }
 
-    private suspend fun handleNewLocation(location: Location, customStatus: String? = null) {
-        val truckId = activeTruckId
+    private suspend fun handleNewLocation(
+        location: Location,
+        sampleTruckId: Int,
+        customStatus: String? = null
+    ) {
+        val truckId = sampleTruckId
         val lat = location.latitude
         val lng = location.longitude
         val speedKmh = location.speed * 3.6f
