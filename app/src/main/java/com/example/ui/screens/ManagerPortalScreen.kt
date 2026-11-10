@@ -187,7 +187,7 @@ fun ManagerPortalScreen(
                 onResetAllClicked = { showResetConfirmDialog = true }
             )
             1 -> {
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     InteractiveFleetMap(
                         trucks = trucks,
                         selectedTruckId = filterTruckId,
