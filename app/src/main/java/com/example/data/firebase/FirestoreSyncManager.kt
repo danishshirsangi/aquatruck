@@ -176,7 +176,7 @@ class FirestoreSyncManager(private val context: Context) {
 
     suspend fun syncVoiceNote(note: VoiceDeliveryNote): Boolean {
         if (auth.currentUser == null) return false
-        try {
+        return try {
             var audioReference = note.audioFilePath
             val localFile = File(note.audioFilePath)
             val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
