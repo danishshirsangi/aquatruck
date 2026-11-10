@@ -10,7 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -244,10 +244,12 @@ fun InteractiveFleetMap(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    panOffsetX += dragAmount.x
-                    panOffsetY += dragAmount.y
+                detectTransformGestures { _, pan, zoom, _ ->
+                    if (zoom.isFinite() && zoom > 0f) {
+                        zoomLevel = (zoomLevel * zoom).coerceIn(11f, 18f)
+                    }
+                    panOffsetX += pan.x
+                    panOffsetY += pan.y
                 }
             }
             .testTag("interactive_fleet_map")
