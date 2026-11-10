@@ -16,6 +16,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import com.google.android.gms.mlkit.vision.codescanner.GmsBarcodeScanning
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -98,6 +99,18 @@ fun BusinessOnboardingScreen(onComplete: () -> Unit) {
                     } else {
                         Text("Join an existing business", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         OutlinedTextField(inviteCode, { inviteCode = it.uppercase().take(12) }, label = { Text("One-time driver invitation code *") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        Button(
+                            onClick = {
+                                GmsBarcodeScanning.getClient(context).startScan()
+                                    .addOnSuccessListener { barcode ->
+                                        barcode.rawValue?.trim()?.let { inviteCode = it.uppercase().take(16) }
+                                    }
+                                    .addOnFailureListener { scanError ->
+                                        error = scanError.localizedMessage ?: "Unable to scan invitation QR code."
+                                    }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Scan invitation QR code") }
                         OutlinedTextField(driverName, { driverName = it }, label = { Text("Your full name *") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                         OutlinedTextField(driverPhone, { driverPhone = it }, label = { Text("Phone number") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                         Text("Enter the individual one-time invitation code and phone number registered by your manager. The invitation determines your business and assigned truck.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
