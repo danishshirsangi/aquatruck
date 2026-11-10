@@ -40,6 +40,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -279,26 +280,78 @@ fun ManagerPortalScreen(
 
 
     if (showTestPaymentDialog) {
-        AlertDialog(
-            onDismissRequest = { showTestPaymentDialog = false },
-            title = { Text("Test truck subscription") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("A new truck requires a ₹99/month subscription.")
-                    Text("TEST MODE — no real payment will be collected.", color = StatusAmberWarning, fontWeight = FontWeight.Bold)
-                    Text("Truck: \${pendingTruckName} (\${pendingTruckPlate})")
+        Dialog(onDismissRequest = { showTestPaymentDialog = false }) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 12.dp
+            ) {
+                Column(modifier = Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(OceanNavyPrimary), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.LocalShipping, contentDescription = null, tint = Color.White)
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Truck subscription", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("Checkout preview", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Surface(shape = RoundedCornerShape(12.dp), color = StatusAmberWarning.copy(alpha = 0.12f), modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.FlashOn, contentDescription = null, tint = StatusAmberWarning)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("TEST PAYMENT MODE", fontWeight = FontWeight.ExtraBold, color = StatusAmberWarning, fontSize = 12.sp)
+                                Text("No money will be charged. Demo checkout only.", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text("Order summary", fontWeight = FontWeight.Bold)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Truck", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(pendingTruckName, fontWeight = FontWeight.SemiBold)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Registration", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(pendingTruckPlate, fontWeight = FontWeight.SemiBold)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Billing", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("₹99 / month", fontWeight = FontWeight.SemiBold)
+                        }
+                        androidx.compose.material3.HorizontalDivider()
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Total due today", fontWeight = FontWeight.Bold)
+                            Text("₹99", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold, color = OceanNavyPrimary)
+                        }
+                    }
+                    Text("Payment method", fontWeight = FontWeight.Bold)
+                    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, CyanWater.copy(alpha = 0.7f)), color = CyanWater.copy(alpha = 0.06f)) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = StatusActiveGreen)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("Demo payment", fontWeight = FontWeight.SemiBold)
+                                Text("UPI / Card flow simulated", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Spacer(modifier = Modifier.weight(1f))
+                            Text("TEST", fontWeight = FontWeight.ExtraBold, color = StatusActiveGreen, fontSize = 11.sp)
+                        }
+                    }
+                    Button(onClick = {
+                        viewModel.addTruck(pendingTruckName, pendingTruckPlate, pendingTruckDriver, pendingTruckCapacity)
+                        showTestPaymentDialog = false
+                    }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                        Text("Complete test payment • ₹99", modifier = Modifier.padding(vertical = 5.dp))
+                    }
+                    TextButton(onClick = { showTestPaymentDialog = false }, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+                    Text("Demo only • No payment provider is connected", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    viewModel.addTruck(pendingTruckName, pendingTruckPlate, pendingTruckDriver, pendingTruckCapacity)
-                    showTestPaymentDialog = false
-                }) { Text("Simulate ₹99 payment") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTestPaymentDialog = false }) { Text("Cancel") }
             }
-        )
+        }
     }
 
     if (showResetConfirmDialog) {
