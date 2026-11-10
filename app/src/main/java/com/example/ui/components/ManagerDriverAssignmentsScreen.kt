@@ -23,6 +23,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
@@ -40,6 +43,8 @@ fun ManagerDriverAssignmentsScreen(
     onEarlyLogoutChanged: (Long, Boolean) -> Unit
 ) {
     var expandedDriverId by remember { mutableStateOf<Long?>(null) }
+    var visibleQrDriverId by remember { mutableStateOf<Long?>(null) }
+    val clipboard = LocalClipboardManager.current
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -56,7 +61,7 @@ fun ManagerDriverAssignmentsScreen(
         if (drivers.isEmpty()) {
             item { Text("No drivers registered yet. Use Add Driver from Fleet Overview first.") }
         }
-        items(drivers, key = { it.id }) { driver ->
+        items(drivers) { driver ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -78,7 +83,13 @@ fun ManagerDriverAssignmentsScreen(
                     if (driver.userUid.isNullOrBlank()) {
                         driver.invitationCode?.let { code ->
                             Text("One-time driver code: $code", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                            DriverInviteQrCode(code)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { clipboard.setText(AnnotatedString(code)) }) { Text("Copy code") }
+                                OutlinedButton(onClick = {
+                                    visibleQrDriverId = if (visibleQrDriverId == driver.id) null else driver.id
+                                }) { Text(if (visibleQrDriverId == driver.id) "Hide QR" else "Show QR") }
+                            }
+                            if (visibleQrDriverId == driver.id) DriverInviteQrCode(code)
                         }
                     }
                     val assignedTruckIsActive = trucks.firstOrNull { it.id == driver.assignedTruckId }?.isShiftActive == true
@@ -136,6 +147,8 @@ fun ManagerDriverAssignmentsScreen(
 @Composable
 private fun DriverInviteQrCode(code: String) {
     val bitmap = remember(code) {
+        runCatching {
+        require(code.isNotBlank()) { "Invitation code is empty" }
         val matrix = QRCodeWriter().encode(code, BarcodeFormat.QR_CODE, 420, 420)
         Bitmap.createBitmap(420, 420, Bitmap.Config.ARGB_8888).also { image ->
             for (x in 0 until 420) {
@@ -144,6 +157,11 @@ private fun DriverInviteQrCode(code: String) {
                 }
             }
         }
+        }.getOrNull()
+    }
+    if (bitmap == null) {
+        Text("Unable to generate QR. Share the invitation code above instead.", color = MaterialTheme.colorScheme.error)
+        return
     }
     Image(
         bitmap = bitmap.asImageBitmap(),
