@@ -109,7 +109,8 @@ fun DriverPortalScreen(
     val earlyLogoutAllowed by viewModel.earlyLogoutAllowed.collectAsState()
     val assignedTruckId by viewModel.assignedDriverTruckId.collectAsState()
     val isDriverAccount = TenantManager.role(context) == "driver"
-    val visibleTrucks = if (isDriverAccount && assignedTruckId != null) trucks.filter { it.id == assignedTruckId } else if (isDriverAccount) emptyList() else trucks
+    // Drivers can choose any available tanker in their own business; identity remains fixed to their account.
+    val visibleTrucks = trucks
     val currentUid = TenantManager.currentUserUid()
     val visibleDrivers = if (isDriverAccount) drivers.filter { it.userUid == currentUid } else drivers
 
