@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.FleetViewModel
 import com.example.ui.UserRole
+import com.example.data.tenant.TenantManager
 import com.example.ui.components.ManagerPinDialog
 import com.example.ui.theme.CyanWater
 import com.example.ui.theme.OceanNavyPrimary
@@ -64,6 +66,8 @@ fun MainScreen(
     viewModel: FleetViewModel = viewModel()
 ) {
     val currentRole by viewModel.currentRole.collectAsState()
+    val context = LocalContext.current
+    val isManagerAccount = TenantManager.role(context) == "manager"
     val isManagerUnlocked by viewModel.isManagerUnlocked.collectAsState()
 
     var showPinDialog by remember { mutableStateOf(false) }
@@ -109,77 +113,79 @@ fun MainScreen(
                     }
                 },
                 actions = {
-                    // Segmented Role Switcher: Driver vs Manager Portal
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = Color.White.copy(alpha = 0.12f),
-                        modifier = Modifier.padding(end = 8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(3.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    // Driver-only memberships never see a Manager mode switch.
+                    if (isManagerAccount) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color.White.copy(alpha = 0.12f),
+                            modifier = Modifier.padding(end = 8.dp)
                         ) {
-                            // Driver Option
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(
-                                        if (currentRole == UserRole.DRIVER) CyanWater else Color.Transparent
-                                    )
-                                    .clickable { viewModel.setRole(UserRole.DRIVER) }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                                    .testTag("role_driver_button"),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                modifier = Modifier.padding(3.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Badge,
-                                        contentDescription = null,
-                                        tint = if (currentRole == UserRole.DRIVER) OceanNavyPrimary else Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Driver",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
-                                        color = if (currentRole == UserRole.DRIVER) OceanNavyPrimary else Color.White
-                                    )
-                                }
-                            }
-
-                            // Manager Option
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(
-                                        if (currentRole == UserRole.MANAGER) CyanWater else Color.Transparent
-                                    )
-                                    .clickable {
-                                        if (isManagerUnlocked) {
-                                            viewModel.setRole(UserRole.MANAGER)
-                                        } else {
-                                            showPinDialog = true
-                                        }
+                                // Driver Option
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(
+                                            if (currentRole == UserRole.DRIVER) CyanWater else Color.Transparent
+                                        )
+                                        .clickable { viewModel.setRole(UserRole.DRIVER) }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        .testTag("role_driver_button"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Badge,
+                                            contentDescription = null,
+                                            tint = if (currentRole == UserRole.DRIVER) OceanNavyPrimary else Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Driver",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            color = if (currentRole == UserRole.DRIVER) OceanNavyPrimary else Color.White
+                                        )
                                     }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                                    .testTag("role_manager_button"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = if (isManagerUnlocked) Icons.Default.LockOpen else Icons.Default.Lock,
-                                        contentDescription = null,
-                                        tint = if (currentRole == UserRole.MANAGER) OceanNavyPrimary else Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Manager",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp,
-                                        color = if (currentRole == UserRole.MANAGER) OceanNavyPrimary else Color.White
-                                    )
+                                }
+    
+                                // Manager Option
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(
+                                            if (currentRole == UserRole.MANAGER) CyanWater else Color.Transparent
+                                        )
+                                        .clickable {
+                                            if (isManagerUnlocked) {
+                                                viewModel.setRole(UserRole.MANAGER)
+                                            } else {
+                                                showPinDialog = true
+                                            }
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        .testTag("role_manager_button"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = if (isManagerUnlocked) Icons.Default.LockOpen else Icons.Default.Lock,
+                                            contentDescription = null,
+                                            tint = if (currentRole == UserRole.MANAGER) OceanNavyPrimary else Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Manager",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            color = if (currentRole == UserRole.MANAGER) OceanNavyPrimary else Color.White
+                                        )
+                                    }
                                 }
                             }
                         }
