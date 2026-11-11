@@ -37,10 +37,12 @@ class FirestoreSyncManager(private val context: Context) {
     }
 
     suspend fun recordTestTruckSubscription(truckId: Int): Boolean {
-        val user = auth.currentUser ?: return false
+        val user = auth.currentUser
+            ?: throw IllegalStateException("Your Google account is not signed in. Sign in again and retry.")
         val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
-            .getString("organization_id", null) ?: return false
-        return try {
+            .getString("organization_id", null)
+            ?: throw IllegalStateException("No business is selected on this device. Sign out and sign in to your manager account again.")
+        try {
             val now = System.currentTimeMillis()
             firestore.collection("organizations").document(orgId)
                 .collection("truck_subscriptions").document(truckId.toString())
@@ -55,10 +57,14 @@ class FirestoreSyncManager(private val context: Context) {
                     "renewsAt" to now + 30L * 24L * 60L * 60L * 1000L,
                     "createdBy" to user.uid
                 )).await()
-            true
+            return true
         } catch (e: Exception) {
-            Log.w("FirestoreSync", "Unable to save test truck subscription: ${e.message}", e)
-            false
+            Log.w("FirestoreSync", "Unable to save test truck subscription (orgId=$orgId, uid=${user.uid}): ${e.message}", e)
+            throw IllegalStateException(
+                "Firestore subscription write failed: ${e.message ?: e.javaClass.simpleName}. " +
+                    "Check that the latest firestore.rules are deployed to the configured database and that your membership is active with role 'manager'.",
+                e
+            )
         }
     }
 
