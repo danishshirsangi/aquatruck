@@ -1,7 +1,7 @@
 import { before, after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebase/rules-unit-testing";
-import { getFirestore, doc, collection, getDoc, getDocs, query, where, setDoc, writeBatch } from "firebase/firestore";
+import { doc, collection, getDoc, getDocs, query, where, setDoc, writeBatch } from "firebase/firestore";
 
 const PROJECT_ID = "demo-aquatrack";
 const DATABASE_ID = "ai-studio-android-aquatrac-ae0f6f83-854d-4712-bbed-b747ec9132c0";
@@ -14,7 +14,7 @@ const INVITE_CODE = "TESTDRIVER123";
 let testEnv;
 
 function dbFor(context) {
-  return getFirestore(context.app, DATABASE_ID);
+  return context.firestore(DATABASE_ID);
 }
 
 async function registerManagerBusiness() {
