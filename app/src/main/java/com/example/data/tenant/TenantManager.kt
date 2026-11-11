@@ -384,11 +384,17 @@ object TenantManager {
                 "Driver membership is not active."
             }
             val active = member.getLong("activeTruckId")?.toInt()?.takeIf { it > 0 }
-            check(active == expectedOldId) { "Your truck assignment changed. Refresh and retry." }
+            val legacyActive = active == null && expectedOldId != null &&
+                member.getLong("assignedTruckId")?.toInt() == expectedOldId
+            check(active == expectedOldId || legacyActive) {
+                "Your truck assignment changed. Refresh and retry."
+            }
             val old = oldRef?.let { tx.get(it) }
             val target = targetRef?.let { tx.get(it) }
             if (old != null) {
-                check(old.exists() && old.getString("activeDriverUid") == uid) {
+                val legacyOwned = legacyActive && old.getString("activeDriverUid").isNullOrBlank() &&
+                    old.getBoolean("isShiftActive") == true
+                check(old.exists() && (old.getString("activeDriverUid") == uid || legacyOwned)) {
                     "You no longer own the previous truck."
                 }
             }
