@@ -2,17 +2,24 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     match /organizations/{orgId}/voice/{fileName} {
-      allow create, update: if request.auth != null
+      // Legacy Firebase Storage voice uploads are restricted to their uploader.
+      // Current voice delivery audio is stored through the authenticated Supabase
+      // Edge Function. Do not expose legacy objects to every signed-in account.
+      allow create: if request.auth != null
         && request.resource.metadata.organizationId == orgId
         && request.resource.metadata.ownerUid == request.auth.uid
-        && request.resource.size < 20 * 1024 * 1024
-        && request.resource.contentType.matches("audio/.*");
-      // Any signed-in member of this business can play its shared delivery recordings.
-      // The organization id is checked against the path metadata so recordings
-      // cannot be mixed between business folders.
-      allow read: if request.auth != null
-        && resource.metadata.organizationId == orgId;
-      allow delete: if request.auth != null
+        && request.resource.size > 0
+        && request.resource.size <= 20 * 1024 * 1024
+        && request.resource.contentType.matches('audio/(mp4|wav|x-wav|mpeg)');
+      allow update: if request.auth != null
+        && resource.metadata.ownerUid == request.auth.uid
+        && request.resource.metadata.organizationId == orgId
+        && request.resource.metadata.ownerUid == request.auth.uid
+        && request.resource.size > 0
+        && request.resource.size <= 20 * 1024 * 1024
+        && request.resource.contentType.matches('audio/(mp4|wav|x-wav|mpeg)');
+      allow read, delete: if request.auth != null
+        && resource.metadata.organizationId == orgId
         && resource.metadata.ownerUid == request.auth.uid;
     }
   }
