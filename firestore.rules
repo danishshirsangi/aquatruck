@@ -39,17 +39,17 @@ service cloud.firestore {
       return memberDoc(orgId).data.assignedTruckId;
     }
 
-    function truckPath(orgId, truckId) {
-      return /databases/$(database)/documents/organizations/$(orgId)/trucks/truck_$(truckId);
+    function truckPath(orgId, truckDocId) {
+      return /databases/$(database)/documents/organizations/$(orgId)/trucks/$(truckDocId);
     }
 
     function ownsTruck(orgId, data) {
       return isDriver(orgId)
         && data.truckId is int
         && memberDoc(orgId).data.activeTruckId == data.truckId
-        && exists(truckPath(orgId, data.truckId))
-        && get(truckPath(orgId, data.truckId)).data.activeDriverUid == request.auth.uid
-        && get(truckPath(orgId, data.truckId)).data.isShiftActive == true;
+        && exists(truckPath(orgId, "truck_" + string(data.truckId)))
+        && get(truckPath(orgId, "truck_" + string(data.truckId))).data.activeDriverUid == request.auth.uid
+        && get(truckPath(orgId, "truck_" + string(data.truckId))).data.isShiftActive == true;
     }
 
     function matchingActiveMembership(data) {
@@ -150,13 +150,13 @@ service cloud.firestore {
           && request.resource.data.activeTruckId is int
           && (
             (request.resource.data.activeTruckId > 0
-              && getAfter(truckPath(orgId, request.resource.data.activeTruckId)).data.activeDriverUid == request.auth.uid
-              && getAfter(truckPath(orgId, request.resource.data.activeTruckId)).data.isShiftActive == true)
+              && getAfter(truckPath(orgId, "truck_" + string(request.resource.data.activeTruckId))).data.activeDriverUid == request.auth.uid
+              && getAfter(truckPath(orgId, "truck_" + string(request.resource.data.activeTruckId))).data.isShiftActive == true)
             || (request.resource.data.activeTruckId == 0
               && resource.data.activeTruckId is int
               && resource.data.activeTruckId > 0
-              && get(truckPath(orgId, resource.data.activeTruckId)).data.activeDriverUid == request.auth.uid
-              && getAfter(truckPath(orgId, resource.data.activeTruckId)).data.activeDriverUid == "")
+              && get(truckPath(orgId, "truck_" + string(resource.data.activeTruckId))).data.activeDriverUid == request.auth.uid
+              && getAfter(truckPath(orgId, "truck_" + string(resource.data.activeTruckId))).data.activeDriverUid == "")
           )
         );
         allow delete: if isManager(orgId);
