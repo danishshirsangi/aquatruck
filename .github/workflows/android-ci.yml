@@ -6,10 +6,12 @@ on:
       - main
       - feat/offline-first-location-sync
       - feat/multi-tenant-fleet-management
+      - security/harden-multitenant-access
   pull_request:
     branches:
       - main
       - feat/offline-first-location-sync
+      - security/harden-multitenant-access
   workflow_dispatch:
 
 permissions:
