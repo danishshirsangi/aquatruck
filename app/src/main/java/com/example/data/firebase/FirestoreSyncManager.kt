@@ -233,6 +233,7 @@ class FirestoreSyncManager(private val context: Context) {
         try {
             val data = hashMapOf(
                 "id" to point.id,
+                "driverUid" to (auth.currentUser?.uid ?: ""),
                 "truckId" to point.truckId,
                 "latitude" to point.latitude,
                 "longitude" to point.longitude,
@@ -262,6 +263,7 @@ class FirestoreSyncManager(private val context: Context) {
                 chunk.forEach { point ->
                     val data = hashMapOf(
                         "id" to point.id,
+                        "driverUid" to (auth.currentUser?.uid ?: ""),
                         "truckId" to point.truckId,
                         "latitude" to point.latitude,
                         "longitude" to point.longitude,
