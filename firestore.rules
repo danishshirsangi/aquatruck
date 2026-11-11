@@ -9,6 +9,18 @@ service cloud.firestore {
       return /databases/$(database)/documents/organizations/$(orgId)/members/$(uid);
     }
 
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function isManagerProfile(orgId) {
+      return signedIn()
+        && exists(userPath(request.auth.uid))
+        && get(userPath(request.auth.uid)).data.organizationId == orgId
+        && get(userPath(request.auth.uid)).data.role == "manager"
+        && get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerUid == request.auth.uid;
+    }
+
     function memberDoc(orgId) {
       return get(memberPath(orgId, request.auth.uid));
     }
@@ -111,7 +123,7 @@ service cloud.firestore {
     match /organizations/{orgId} {
       allow create: if signedIn()
         && request.resource.data.ownerUid == request.auth.uid;
-      allow get: if isMember(orgId);
+      allow get: if isMember(orgId) || isManagerProfile(orgId);
       allow list, delete: if false;
       allow update: if isManager(orgId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
