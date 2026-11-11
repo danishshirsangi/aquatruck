@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - security/harden-multitenant-access
+      - feat/driver-dynamic-truck-selection
   pull_request:
     branches:
       - security/harden-multitenant-access
+      - feat/driver-dynamic-truck-selection
   workflow_dispatch:
 
 permissions:
