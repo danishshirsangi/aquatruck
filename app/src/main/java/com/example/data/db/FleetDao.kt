@@ -26,6 +26,9 @@ interface FleetDao {
     @Query("SELECT * FROM trucks WHERE id = :truckId")
     suspend fun getTruckByIdDirect(truckId: Int): TruckEntity?
 
+    @Query("SELECT * FROM trucks ORDER BY id ASC")
+    suspend fun getAllTrucksSnapshot(): List<TruckEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTruck(truck: TruckEntity): Long
 
