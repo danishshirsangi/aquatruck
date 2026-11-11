@@ -69,7 +69,6 @@ async function createCompleteBusinessAndDriver() {
   const { managerContext, db: managerDb } = await registerManagerBusiness();
   await registerDriverAndInvite(managerDb);
   const { driverContext, db: driverDb } = await claimDriverInvitation();
-  await claimTruckForDriver(driverDb);
   return { managerContext, managerDb, driverContext, driverDb };
 }
 
@@ -110,6 +109,7 @@ test("driver can see all trucks in their own business before choosing one", asyn
 
 test("active driver uploads GPS points and manager reads route history", async () => {
   const { managerDb, driverDb } = await createCompleteBusinessAndDriver();
+  await claimTruckForDriver(driverDb);
   const batch = writeBatch(driverDb);
   for (let i = 1; i <= 8; i++) {
     const point = gpsPoint(i);
@@ -128,8 +128,9 @@ test("missing membership rejects GPS upload", async () => {
   await assertSucceeds(getDoc(doc(managerDb, "organizations", ORG_ID)));
 });
 
-test("driver cannot upload GPS for a different assigned truck", async () => {
+test("driver cannot upload GPS for a truck they have not claimed", async () => {
   const { driverDb } = await createCompleteBusinessAndDriver();
+  await claimTruckForDriver(driverDb);
   await assertFails(setDoc(doc(driverDb, "organizations", ORG_ID, "location_points", "wrong-truck"), gpsPoint(91, 2)));
 });
 
@@ -141,6 +142,7 @@ test("driver cannot access another organisation's GPS history", async () => {
 
 test("offline queue uploads after network returns", async () => {
   const { managerDb, driverDb } = await createCompleteBusinessAndDriver();
+  await claimTruckForDriver(driverDb);
   const localQueue = Array.from({ length: 5 }, (_, i) => gpsPoint(200 + i));
   let networkAvailable = false;
   assert.equal(networkAvailable, false);
