@@ -36,6 +36,12 @@ class LocationSyncWorker(
                 if (pendingLocations.isNotEmpty()) {
                     val ids = pendingLocations.map { it.id }
                     if (!syncManager.syncLocationBatch(pendingLocations)) {
+                        Log.e(
+                            "LocationSyncWorker",
+                            "Firestore rejected ${pendingLocations.size} pending location points; " +
+                                "truckIds=${pendingLocations.map { it.truckId }.distinct()}. " +
+                                "Keeping points locally and retrying."
+                        )
                         dao.incrementLocationRetryCount(ids)
                         return Result.retry()
                     }
