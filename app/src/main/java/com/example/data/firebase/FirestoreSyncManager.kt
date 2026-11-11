@@ -171,9 +171,7 @@ class FirestoreSyncManager(private val context: Context) {
     }
 
     suspend fun syncAttendance(record: AttendanceRecord): Boolean {
-        if (auth.currentUser == null) {
-            throw IllegalStateException("Your Google account is no longer signed in. Sign in again and retry.")
-        }
+        if (auth.currentUser == null) return false
         return try {
             val data = hashMapOf(
                 "id" to record.id,
@@ -192,11 +190,7 @@ class FirestoreSyncManager(private val context: Context) {
             true
         } catch (e: Exception) {
             Log.w("FirestoreSync", "Error syncing attendance: ${e.message}", e)
-            throw IllegalStateException(
-                "Could not save your shift attendance: ${e.message ?: e.javaClass.simpleName}. " +
-                    "Check your connection and confirm the latest Firestore security rules are deployed.",
-                e
-            )
+            false
         }
     }
 
