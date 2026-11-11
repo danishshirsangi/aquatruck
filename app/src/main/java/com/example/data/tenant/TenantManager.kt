@@ -393,6 +393,7 @@ object TenantManager {
         val isManager = memberRole == "manager"
         val member = firestore(context).collection("organizations").document(orgId)
             .collection("members").document(uid).get().await()
+        val activeTruckId = member.getLong("activeTruckId")?.toInt()?.takeIf { it > 0 }
         val assignedId = member.getLong("assignedTruckId")?.toInt() ?: assignedTruckId(context)
         val dao = com.example.data.db.AppDatabase.getDatabase(context).fleetDao()
         val root = firestore(context).collection("organizations").document(orgId)
@@ -444,8 +445,14 @@ object TenantManager {
             }
         }
 
+        // Drivers may read operational history only for the truck they currently claim.
+        // Before starting a shift there is no active truck, so do not query protected records.
+        if (!isManager && activeTruckId == null) return
+
         val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
-        val locationsQuery = root.collection("location_points").whereGreaterThanOrEqualTo("timestamp", cutoff)
+        val locationsBase = root.collection("location_points")
+        val locationsQuery = if (isManager) locationsBase.whereGreaterThanOrEqualTo("timestamp", cutoff)
+            else locationsBase.whereEqualTo("truckId", activeTruckId).whereGreaterThanOrEqualTo("timestamp", cutoff)
         locationsQuery.get().await().documents.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val timestamp = doc.getLong("timestamp") ?: return@forEach
@@ -463,7 +470,8 @@ object TenantManager {
         }
 
         val stopCollection = root.collection("stop_records")
-        val stopSnapshot = stopCollection.get().await()
+        val stopQuery = if (isManager) stopCollection else stopCollection.whereEqualTo("truckId", activeTruckId)
+        val stopSnapshot = stopQuery.get().await()
         stopSnapshot.documents.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val startTime = doc.getLong("startTime") ?: return@forEach
@@ -482,7 +490,8 @@ object TenantManager {
         }
 
         val voiceCollection = root.collection("voice_delivery_notes")
-        val voiceSnapshot = voiceCollection.get().await()
+        val voiceQuery = if (isManager) voiceCollection else voiceCollection.whereEqualTo("truckId", activeTruckId)
+        val voiceSnapshot = voiceQuery.get().await()
         voiceSnapshot.documents.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val timestamp = doc.getLong("timestamp") ?: return@forEach
@@ -502,7 +511,8 @@ object TenantManager {
         }
 
         val attendanceCollection = root.collection("attendance")
-        val attendanceSnapshot = attendanceCollection.get().await()
+        val attendanceQuery = if (isManager) attendanceCollection else attendanceCollection.whereEqualTo("truckId", activeTruckId)
+        val attendanceSnapshot = attendanceQuery.get().await()
         attendanceSnapshot.documents.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val checkInTime = doc.getLong("checkInTime") ?: return@forEach
