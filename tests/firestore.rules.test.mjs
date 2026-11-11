@@ -217,6 +217,17 @@ test("driver can switch to a selected available truck when local session is empt
   assert.equal(selectedTruck.data().activeDriverUid, DRIVER_UID);
 });
 
+test("active driver can create and retry GPS points for their currently claimed truck", async () => {
+  const { driverDb, managerDb } = await createCompleteBusinessAndDriver();
+  await claimTruckForDriver(driverDb);
+  const point = { ...gpsPoint(501), driverUid: DRIVER_UID };
+  const pointRef = doc(driverDb, "organizations", ORG_ID, "location_points", "active-driver-point");
+  await assertSucceeds(setDoc(pointRef, point));
+  await assertSucceeds(setDoc(pointRef, { ...point, latitude: 15.853 }, { merge: true }));
+  const saved = await assertSucceeds(getDoc(doc(managerDb, "organizations", ORG_ID, "location_points", "active-driver-point")));
+  assert.equal(saved.data().latitude, 15.853);
+});
+
 test("driver cannot upload GPS for a truck they have not claimed", async () => {
   const { driverDb } = await createCompleteBusinessAndDriver();
   await claimTruckForDriver(driverDb);
