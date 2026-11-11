@@ -134,6 +134,26 @@ test("driver cannot upload GPS for a truck they have not claimed", async () => {
   await assertFails(setDoc(doc(driverDb, "organizations", ORG_ID, "location_points", "wrong-truck"), gpsPoint(91, 2)));
 });
 
+test("driver cannot claim a truck unless membership and truck ownership update together", async () => {
+  const { driverDb } = await createCompleteBusinessAndDriver();
+  await claimTruckForDriver(driverDb);
+  await assertFails(setDoc(doc(driverDb, "organizations", ORG_ID, "trucks", "truck_2"), {
+    id: 2, activeDriverUid: DRIVER_UID, isShiftActive: true
+  }, { merge: true }));
+});
+
+test("logout releases the active truck and blocks further GPS uploads", async () => {
+  const { driverDb } = await createCompleteBusinessAndDriver();
+  await claimTruckForDriver(driverDb);
+  const batch = writeBatch(driverDb);
+  batch.update(doc(driverDb, "organizations", ORG_ID, "members", DRIVER_UID), { activeTruckId: 0 });
+  batch.update(doc(driverDb, "organizations", ORG_ID, "trucks", "truck_1"), {
+    activeDriverUid: "", isShiftActive: false, statusText: "Off Duty"
+  });
+  await assertSucceeds(batch.commit());
+  await assertFails(setDoc(doc(driverDb, "organizations", ORG_ID, "location_points", "after-logout"), gpsPoint(93)));
+});
+
 test("driver cannot access another organisation's GPS history", async () => {
   const { driverDb } = await createCompleteBusinessAndDriver();
   await assertFails(setDoc(doc(driverDb, "organizations", "another-company", "location_points", "foreign-point"), gpsPoint(92)));
