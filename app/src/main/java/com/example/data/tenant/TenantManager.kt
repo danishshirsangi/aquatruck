@@ -409,7 +409,7 @@ object TenantManager {
             }
             val now = System.currentTimeMillis()
             if (oldRef != null) tx.update(oldRef, mapOf(
-                "activeDriverUid" to "", "isShiftActive" to false,
+                "activeDriverUid" to "", "lastDriverUid" to uid, "isShiftActive" to false,
                 "statusText" to "Off Duty", "currentSpeedKmh" to 0.0,
                 "lastUpdated" to now
             ))
