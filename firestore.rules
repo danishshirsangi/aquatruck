@@ -270,7 +270,13 @@ service cloud.firestore {
 
       match /location_points/{pointId} {
         allow read: if isManager(orgId) || ownsTruck(orgId, resource.data);
-        allow create: if isManager(orgId) || ownsTruck(orgId, request.resource.data);
+        allow create: if isManager(orgId) || ownsTruck(orgId, request.resource.data) || (
+          isDriver(orgId)
+          && request.resource.data.driverUid == request.auth.uid
+          && request.resource.data.truckId is int
+          && exists(truckPath(orgId, "truck_" + string(request.resource.data.truckId)))
+          && get(truckPath(orgId, "truck_" + string(request.resource.data.truckId))).data.lastDriverUid == request.auth.uid
+        );
         allow update, delete: if isManager(orgId);
       }
 
