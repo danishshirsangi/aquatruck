@@ -484,19 +484,18 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             if (newTruckId == oldTruckId) return@launch
             val newTruck = dao.getTruckByIdDirect(newTruckId) ?: return@launch
             if (newTruck.isShiftActive) return@launch
-            try {
-                TenantManager.changeActiveTruck(context, oldTruckId, newTruckId)
-            } catch (e: Exception) {
-                android.util.Log.w("FleetViewModel", "Unable to switch truck: " + e.message, e)
-                return@launch
-            }
-
             val now = System.currentTimeMillis()
             val oldAttendance = dao.getActiveAttendanceDirect(oldTruckId)
             if (oldAttendance != null) {
                 val completed = oldAttendance.copy(checkOutTime = now, isCompleted = true)
                 dao.updateAttendance(completed)
                 firestoreSync.syncAttendance(completed)
+            }
+            try {
+                TenantManager.changeActiveTruck(context, oldTruckId, newTruckId)
+            } catch (e: Exception) {
+                android.util.Log.w("FleetViewModel", "Unable to switch truck: " + e.message, e)
+                return@launch
             }
 
             val oldTruck = dao.getTruckByIdDirect(oldTruckId)
@@ -564,14 +563,6 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     fun endDriverShift(truckId: Int, context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             val now = System.currentTimeMillis()
-            if (TenantManager.role(context) == "driver") {
-                try {
-                    TenantManager.changeActiveTruck(context, truckId, null)
-                } catch (e: Exception) {
-                    android.util.Log.w("FleetViewModel", "Unable to release truck on logout: " + e.message, e)
-                    return@launch
-                }
-            }
 
             // 1. Complete active attendance record
             val activeAtt = dao.getActiveAttendanceDirect(truckId)
@@ -582,6 +573,14 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 dao.updateAttendance(completedAtt)
                 firestoreSync.syncAttendance(completedAtt)
+            }
+            if (TenantManager.role(context) == "driver") {
+                try {
+                    TenantManager.changeActiveTruck(context, truckId, null)
+                } catch (e: Exception) {
+                    android.util.Log.w("FleetViewModel", "Unable to release truck on logout: " + e.message, e)
+                    return@launch
+                }
             }
 
             // 2. Mark truck off duty
