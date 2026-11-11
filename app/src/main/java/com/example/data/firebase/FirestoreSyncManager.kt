@@ -279,7 +279,15 @@ class FirestoreSyncManager(private val context: Context) {
             }
             true
         } catch (e: Exception) {
-            Log.w("FirestoreSync", "Location batch upload failed: ${e.message}")
+            val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+                .getString("organization_id", null)
+            val uid = auth.currentUser?.uid
+            Log.e(
+                "FirestoreSync",
+                "Location batch upload failed (orgId=${orgId}, uid=${uid}, points=${points.size}, " +
+                    "truckIds=${points.map { it.truckId }.distinct()}): ${e.message}",
+                e
+            )
             false
         }
     }
