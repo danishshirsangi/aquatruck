@@ -320,12 +320,12 @@ fun ManagerPortalScreen(
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Billing", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("₹99 / month", fontWeight = FontWeight.SemiBold)
+                            Text("₹149 / month", fontWeight = FontWeight.SemiBold)
                         }
                         androidx.compose.material3.HorizontalDivider()
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Total due today", fontWeight = FontWeight.Bold)
-                            Text("₹99", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold, color = OceanNavyPrimary)
+                            Text("₹149", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold, color = OceanNavyPrimary)
                         }
                     }
                     Text("Payment method", fontWeight = FontWeight.Bold)
@@ -345,7 +345,7 @@ fun ManagerPortalScreen(
                         viewModel.addTruck(pendingTruckName, pendingTruckPlate, pendingTruckDriver, pendingTruckCapacity)
                         showTestPaymentDialog = false
                     }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-                        Text("Complete test payment • ₹99", modifier = Modifier.padding(vertical = 5.dp))
+                        Text("Complete test payment • ₹149", modifier = Modifier.padding(vertical = 5.dp))
                     }
                     TextButton(onClick = { showTestPaymentDialog = false }, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
                     Text("Demo only • No payment provider is connected", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
