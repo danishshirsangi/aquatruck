@@ -616,7 +616,7 @@ object TenantManager {
                     close(error)
                     return@addSnapshotListener
                 }
-                trySend(snapshot?.getLong("assignedTruckId")?.toInt())
+                trySend(snapshot?.getLong("activeTruckId")?.toInt()?.takeIf { it > 0 })
             }
         awaitClose { listener.remove() }
     }
