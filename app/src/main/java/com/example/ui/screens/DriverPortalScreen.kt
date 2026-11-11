@@ -164,6 +164,8 @@ fun DriverPortalScreen(
     val isPlaying by viewModel.audioPlayer.isPlaying.collectAsState()
 
     var showSelfieDialog by remember { mutableStateOf(false) }
+    var isStartingShift by remember { mutableStateOf(false) }
+    var shiftStartError by remember { mutableStateOf<String?>(null) }
     var switchTruckMenuExpanded by remember { mutableStateOf(false) }
 
     // Pulse animation for recording mic
@@ -1038,10 +1040,19 @@ fun DriverPortalScreen(
         SelfieAttendanceDialog(
             truck = truckForSelfie,
             driverName = effectiveDriverName,
-            onDismiss = { showSelfieDialog = false },
+            isSubmitting = isStartingShift,
+            errorMessage = shiftStartError,
+            onDismiss = { if (!isStartingShift) { showSelfieDialog = false; shiftStartError = null } },
             onConfirmCheckIn = { selfieUri ->
-                viewModel.startDriverShift(truckForSelfie.id, effectiveDriverName, selfieUri, context)
-                showSelfieDialog = false
+                if (!isStartingShift) {
+                    isStartingShift = true
+                    shiftStartError = null
+                    viewModel.startDriverShift(truckForSelfie.id, effectiveDriverName, selfieUri, context) { success, error ->
+                        isStartingShift = false
+                        if (success) { showSelfieDialog = false; shiftStartError = null }
+                        else shiftStartError = error ?: "Unable to start your shift. Please try again."
+                    }
+                }
             }
         )
     }
