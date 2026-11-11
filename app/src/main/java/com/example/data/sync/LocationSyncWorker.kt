@@ -116,7 +116,11 @@ object LocationSyncScheduler {
 
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
             UNIQUE_WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
+            // GPS callbacks can arrive while an upload is running. REPLACE cancels
+            // the in-flight Firestore batch on every new sample; KEEP lets that
+            // batch finish. The worker drains pending rows in bounded batches,
+            // and later callbacks enqueue another run after it completes.
+            ExistingWorkPolicy.KEEP,
             request
         )
     }
