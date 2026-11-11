@@ -132,23 +132,33 @@ object TenantManager {
             var member = root.collection("members").document(user.uid).get().await()
             if (!member.exists() && profileRole == "driver") {
                 // Repair legacy driver accounts whose user profile exists but whose
-                // membership document was never created. The claimed driver profile
-                // and single-use invitation are the proof of business membership.
+                // membership document was never created. The claimed invitation is
+                // the proof that this account joined this business.
                 val driver = root.collection("drivers").whereEqualTo("uid", user.uid).limit(1).get().await()
                     .documents.firstOrNull() ?: return false
                 val invitationId = driver.getString("invitationCode") ?: return false
                 val driverId = driver.getLong("id") ?: return false
                 val invitation = firestore(context).collection("driver_invitations").document(invitationId).get().await()
                 if (invitation.getString("uid") != user.uid || invitation.getBoolean("active") != false) return false
-                val repaired = mapOf(
+                root.collection("members").document(user.uid).set(mapOf(
                     "uid" to user.uid, "driverId" to driverId, "role" to "driver",
                     "name" to (driver.getString("name") ?: snapshot.getString("displayName") ?: "Driver"),
                     "phone" to (driver.getString("phone") ?: ""),
                     "earlyLogoutEnabled" to (driver.getBoolean("earlyLogoutEnabled") ?: false),
                     "status" to "active", "createdAt" to System.currentTimeMillis(),
                     "invitationId" to invitationId, "activeTruckId" to 0
-                )
-                root.collection("members").document(user.uid).set(repaired).await()
+                )).await()
+                member = root.collection("members").document(user.uid).get().await()
+            } else if (!member.exists() && profileRole == "manager") {
+                // Restore a legacy manager membership only when the organisation's
+                // ownerUid and the signed-in user's existing profile agree.
+                val org = root.get().await()
+                if (org.getString("ownerUid") != user.uid) return false
+                root.collection("members").document(user.uid).set(mapOf(
+                    "uid" to user.uid, "role" to "manager",
+                    "name" to (snapshot.getString("displayName") ?: "Manager"),
+                    "status" to "active", "createdAt" to System.currentTimeMillis()
+                )).await()
                 member = root.collection("members").document(user.uid).get().await()
             }
             if (!member.exists() || member.getString("status") != "active") return false
