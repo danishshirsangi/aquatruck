@@ -128,6 +128,25 @@ test("missing membership rejects GPS upload", async () => {
   await assertSucceeds(getDoc(doc(managerDb, "organizations", ORG_ID)));
 });
 
+test("driver attendance is accepted only after the truck claim is active", async () => {
+  const { driverDb } = await createCompleteBusinessAndDriver();
+  const attendance = {
+    id: 1,
+    truckId: TRUCK_ID,
+    driverName: "Test Driver",
+    selfieUri: "file:///driver-selfie.jpg",
+    checkInTime: 1794400000000,
+    checkOutTime: 0,
+    checkInLat: 15.852,
+    checkInLng: 74.510,
+    isCompleted: false
+  };
+  await assertFails(setDoc(doc(driverDb, "organizations", ORG_ID, "attendance", "before-claim"), attendance));
+
+  await claimTruckForDriver(driverDb);
+  await assertSucceeds(setDoc(doc(driverDb, "organizations", ORG_ID, "attendance", "after-claim"), attendance));
+});
+
 test("driver cannot upload GPS for a truck they have not claimed", async () => {
   const { driverDb } = await createCompleteBusinessAndDriver();
   await claimTruckForDriver(driverDb);
