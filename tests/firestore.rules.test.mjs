@@ -35,7 +35,8 @@ async function registerManagerBusiness() {
 async function registerDriverAndInvite(managerDb) {
   const batch = writeBatch(managerDb);
   const org = doc(managerDb, "organizations", ORG_ID);
-  batch.set(doc(org, "trucks", "truck_1"), { id: TRUCK_ID, truckNumber: TRUCK_ID, isShiftActive: false, statusText: "Off Duty" });
+  batch.set(doc(org, "trucks", "truck_1"), { id: TRUCK_ID, truckNumber: TRUCK_ID, activeDriverUid: "", isShiftActive: false, statusText: "Off Duty" });
+  batch.set(doc(org, "trucks", "truck_2"), { id: 2, truckNumber: 2, activeDriverUid: "", isShiftActive: false, statusText: "Off Duty" });
   batch.set(doc(org, "drivers", "driver_1"), { id: DRIVER_ID, name: "Test Driver", phone: "9999999999", assignedTruckId: TRUCK_ID, uid: "", status: "pending", invitationCode: INVITE_CODE });
   batch.set(doc(managerDb, "driver_invitations", INVITE_CODE), { organizationId: ORG_ID, businessName: "Test Water Company", driverId: DRIVER_ID, driverName: "Test Driver", phoneHash: "test-phone-hash", assignedTruckId: TRUCK_ID, active: true, uid: "" });
   await assertSucceeds(batch.commit());
@@ -89,8 +90,14 @@ test("driver invitation claim atomically creates membership and user profile", a
   assert.equal(user.data().role, "driver");
 });
 
-test("active driver uploads GPS points and manager reads route history", async () => {
+test("driver atomically claims an available truck, uploads GPS and manager reads route history", async () => {
   const { managerDb, driverDb } = await createCompleteBusinessAndDriver();
+  const claim = writeBatch(driverDb);
+  claim.update(doc(driverDb, "organizations", ORG_ID, "trucks", "truck_1"), {
+    activeDriverUid: DRIVER_UID, isShiftActive: true, statusText: "Shift Active - En Route"
+  });
+  claim.update(doc(driverDb, "organizations", ORG_ID, "members", DRIVER_UID), { activeTruckId: TRUCK_ID });
+  await assertSucceeds(claim.commit());
   const batch = writeBatch(driverDb);
   for (let i = 1; i <= 8; i++) {
     const point = gpsPoint(i);
@@ -109,12 +116,35 @@ test("missing membership rejects GPS upload", async () => {
   await assertSucceeds(getDoc(doc(managerDb, "organizations", ORG_ID)));
 });
 
-test("driver can upload GPS for any fleet truck in their organization", async () => {
-  const { driverDb, managerDb } = await createCompleteBusinessAndDriver();
-  const point = gpsPoint(91, 2);
-  await assertSucceeds(setDoc(doc(driverDb, "organizations", ORG_ID, "location_points", "different-truck"), point));
-  const snap = await assertSucceeds(getDoc(doc(managerDb, "organizations", ORG_ID, "location_points", "different-truck")));
-  assert.equal(snap.data().truckId, 2);
+test("driver cannot upload GPS for a truck they have not claimed", async () => {
+  const { driverDb } = await createCompleteBusinessAndDriver();
+  await assertFails(setDoc(doc(driverDb, "organizations", ORG_ID, "location_points", "different-truck"), gpsPoint(91, 2)));
+});
+
+test("driver cannot activate or change the status of another truck", async () => {
+  const { driverDb } = await createCompleteBusinessAndDriver();
+  await assertFails(setDoc(doc(driverDb, "organizations", ORG_ID, "trucks", "truck_2"), {
+    id: 2, truckNumber: 2, activeDriverUid: DRIVER_UID, isShiftActive: true, statusText: "Shift Active"
+  }, { merge: true }));
+});
+
+test("driver cannot read another truck's route history", async () => {
+  const { managerDb, driverDb } = await createCompleteBusinessAndDriver();
+  await assertSucceeds(setDoc(doc(managerDb, "organizations", ORG_ID, "location_points", "other-route"), gpsPoint(92, 2)));
+  await assertFails(getDoc(doc(driverDb, "organizations", ORG_ID, "location_points", "other-route")));
+});
+
+test("driver cannot claim an occupied truck", async () => {
+  const { managerDb, driverDb } = await createCompleteBusinessAndDriver();
+  await assertSucceeds(setDoc(doc(managerDb, "organizations", ORG_ID, "trucks", "truck_2"), {
+    id: 2, truckNumber: 2, activeDriverUid: "another-driver", isShiftActive: true, statusText: "Shift Active"
+  }));
+  const claim = writeBatch(driverDb);
+  claim.update(doc(driverDb, "organizations", ORG_ID, "trucks", "truck_2"), {
+    activeDriverUid: DRIVER_UID, isShiftActive: true, statusText: "Shift Active"
+  });
+  claim.update(doc(driverDb, "organizations", ORG_ID, "members", DRIVER_UID), { activeTruckId: 2 });
+  await assertFails(claim.commit());
 });
 
 test("driver cannot access another organisation's GPS history", async () => {
