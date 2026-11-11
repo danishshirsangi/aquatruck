@@ -500,7 +500,14 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             if (oldAttendance != null) {
                 val completed = oldAttendance.copy(checkOutTime = now, isCompleted = true)
                 dao.updateAttendance(completed)
-                firestoreSync.syncAttendance(completed)
+                if (TenantManager.role(context) == "driver") firestoreSync.syncAttendance(completed)
+            }
+            if (TenantManager.role(context) == "driver") {
+                try {
+                    TenantManager.changeActiveTruck(context, expectedOldId = oldTruckId, targetId = newTruckId)
+                } catch (_: Exception) {
+                    return@launch
+                }
             }
 
             val oldTruck = dao.getTruckByIdDirect(oldTruckId)
@@ -512,7 +519,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                     lastUpdated = now
                 )
                 dao.updateTruck(offDuty)
-                firestoreSync.syncTruck(offDuty)
+                if (TenantManager.role(context) != "driver") firestoreSync.syncTruck(offDuty)
             }
 
             val driverName = _loggedInDriverName.value ?: "Driver"
@@ -548,7 +555,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 lastUpdated = now
             )
             dao.updateTruck(activeTruck)
-            firestoreSync.syncTruck(activeTruck)
+            if (TenantManager.role(context) != "driver") firestoreSync.syncTruck(activeTruck)
 
             if (lat != 0.0 || lng != 0.0) {
                 dao.insertLocationPoint(LocationPoint(
