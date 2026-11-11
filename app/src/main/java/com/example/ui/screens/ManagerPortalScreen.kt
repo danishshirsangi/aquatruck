@@ -102,6 +102,7 @@ fun ManagerPortalScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val trucks by viewModel.allTrucks.collectAsState()
+    val truckAddError by viewModel.truckAddError.collectAsState()
     val drivers by viewModel.allDrivers.collectAsState()
     val allStops by viewModel.allStops.collectAsState()
     val allAttendance by viewModel.allAttendanceHistory.collectAsState()
@@ -234,6 +235,17 @@ fun ManagerPortalScreen(
                 onEarlyLogoutChanged = { driverId, enabled -> viewModel.setDriverEarlyLogout(driverId, enabled) }
             )
         }
+    }
+
+    truckAddError?.let { error ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearTruckAddError() },
+            title = { Text("Could not add truck") },
+            text = { Text(error) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.clearTruckAddError() }) { Text("OK") }
+            }
+        )
     }
 
     driverPendingDeletion?.let { driver ->
