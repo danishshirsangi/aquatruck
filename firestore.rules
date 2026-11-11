@@ -39,10 +39,17 @@ service cloud.firestore {
       return memberDoc(orgId).data.assignedTruckId;
     }
 
+    function truckPath(orgId, truckId) {
+      return /databases/$(database)/documents/organizations/$(orgId)/trucks/truck_$(truckId);
+    }
+
     function ownsTruck(orgId, data) {
       return isDriver(orgId)
         && data.truckId is int
-        && data.truckId == assignedTruckId(orgId);
+        && memberDoc(orgId).data.activeTruckId == data.truckId
+        && exists(truckPath(orgId, data.truckId))
+        && get(truckPath(orgId, data.truckId)).data.activeDriverUid == request.auth.uid
+        && get(truckPath(orgId, data.truckId)).data.isShiftActive == true;
     }
 
     function matchingActiveMembership(data) {
@@ -129,13 +136,29 @@ service cloud.firestore {
             && getAfter(/databases/$(database)/documents/driver_invitations/$(request.resource.data.invitationId)).data.uid == uid
             && getAfter(/databases/$(database)/documents/driver_invitations/$(request.resource.data.invitationId)).data.active == false
             && getAfter(/databases/$(database)/documents/driver_invitations/$(request.resource.data.invitationId)).data.driverId == request.resource.data.driverId
-            && getAfter(/databases/$(database)/documents/driver_invitations/$(request.resource.data.invitationId)).data.assignedTruckId == request.resource.data.assignedTruckId
           )
         );
-        allow update: if isManager(orgId)
+        allow update: if (
+          isManager(orgId)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             "assignedTruckId", "earlyLogoutEnabled", "name", "phone"
-          ]);
+          ])
+        ) || (
+          isDriver(orgId)
+          && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["activeTruckId"])
+          && request.resource.data.activeTruckId is int
+          && (
+            (request.resource.data.activeTruckId > 0
+              && getAfter(truckPath(orgId, request.resource.data.activeTruckId)).data.activeDriverUid == request.auth.uid
+              && getAfter(truckPath(orgId, request.resource.data.activeTruckId)).data.isShiftActive == true)
+            || (request.resource.data.activeTruckId == 0
+              && resource.data.activeTruckId is int
+              && resource.data.activeTruckId > 0
+              && get(truckPath(orgId, resource.data.activeTruckId)).data.activeDriverUid == request.auth.uid
+              && getAfter(truckPath(orgId, resource.data.activeTruckId)).data.activeDriverUid == "")
+          )
+        );
         allow delete: if isManager(orgId);
       }
 
@@ -154,23 +177,41 @@ service cloud.firestore {
       }
 
       match /trucks/{truckId} {
-        allow read: if isManager(orgId)
-          || (isDriver(orgId) && resource.data.id == assignedTruckId(orgId));
+        allow read: if isManager(orgId) || isDriver(orgId);
         allow create, delete: if isManager(orgId);
         allow update: if isManager(orgId) || (
           isDriver(orgId)
-          && resource.data.id == assignedTruckId(orgId)
-          && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly([
-              "currentLat", "currentLng", "currentSpeedKmh",
-              "isShiftActive", "statusText", "lastUpdated", "driverName"
-            ])
+          && resource.data.id is int
+          && (
+            (resource.data.activeDriverUid == request.auth.uid
+              && request.resource.data.activeDriverUid == request.auth.uid
+              && request.resource.data.isShiftActive == true
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                "currentLat", "currentLng", "currentSpeedKmh",
+                "statusText", "lastUpdated", "driverName"
+              ]))
+            || (resource.data.activeDriverUid == ""
+              && resource.data.isShiftActive != true
+              && request.resource.data.activeDriverUid == request.auth.uid
+              && request.resource.data.isShiftActive == true
+              && getAfter(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.activeTruckId == resource.data.id
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                "activeDriverUid", "isShiftActive", "statusText", "lastUpdated"
+              ]))
+            || (resource.data.activeDriverUid == request.auth.uid
+              && request.resource.data.activeDriverUid == ""
+              && request.resource.data.isShiftActive == false
+              && getAfter(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.activeTruckId != resource.data.id
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                "activeDriverUid", "isShiftActive", "statusText", "currentSpeedKmh", "lastUpdated"
+              ]))
+          )
         );
       }
 
       match /drivers/{driverId} {
         allow read: if isManager(orgId)
-          || (isMember(orgId) && resource.data.uid == request.auth.uid);
+          || (signedIn() && resource.data.uid == request.auth.uid);
         allow create: if isManager(orgId);
         allow update: if isManager(orgId) || (
           signedIn()
