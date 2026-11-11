@@ -228,7 +228,7 @@ service cloud.firestore {
               && request.resource.data.isShiftActive == false
               && getAfter(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.activeTruckId != resource.data.id
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                "activeDriverUid", "isShiftActive", "statusText", "currentSpeedKmh", "lastUpdated"
+                "activeDriverUid", "lastDriverUid", "isShiftActive", "statusText", "currentSpeedKmh", "lastUpdated"
               ]))
           )
         );
