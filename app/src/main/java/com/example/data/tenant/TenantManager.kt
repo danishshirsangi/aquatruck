@@ -128,13 +128,33 @@ object TenantManager {
             val orgId = snapshot.getString("organizationId") ?: return false
             val profileRole = snapshot.getString("role") ?: return false
             val name = snapshot.getString("businessName") ?: "My Business"
-            val member = firestore(context).collection("organizations").document(orgId)
-                .collection("members").document(user.uid).get().await()
+            val root = firestore(context).collection("organizations").document(orgId)
+            var member = root.collection("members").document(user.uid).get().await()
+            if (!member.exists() && profileRole == "driver") {
+                // Repair legacy driver accounts whose user profile exists but whose
+                // membership document was never created. The claimed driver profile
+                // and single-use invitation are the proof of business membership.
+                val driver = root.collection("drivers").whereEqualTo("uid", user.uid).limit(1).get().await()
+                    .documents.firstOrNull() ?: return false
+                val invitationId = driver.getString("invitationCode") ?: return false
+                val driverId = driver.getLong("id") ?: return false
+                val invitation = firestore(context).collection("driver_invitations").document(invitationId).get().await()
+                if (invitation.getString("uid") != user.uid || invitation.getBoolean("active") != false) return false
+                val repaired = mapOf(
+                    "uid" to user.uid, "driverId" to driverId, "role" to "driver",
+                    "name" to (driver.getString("name") ?: snapshot.getString("displayName") ?: "Driver"),
+                    "phone" to (driver.getString("phone") ?: ""),
+                    "earlyLogoutEnabled" to (driver.getBoolean("earlyLogoutEnabled") ?: false),
+                    "status" to "active", "createdAt" to System.currentTimeMillis(),
+                    "invitationId" to invitationId, "activeTruckId" to 0
+                )
+                root.collection("members").document(user.uid).set(repaired).await()
+                member = root.collection("members").document(user.uid).get().await()
+            }
             if (!member.exists() || member.getString("status") != "active") return false
             val memberRole = member.getString("role") ?: return false
             if (memberRole !in setOf("manager", "driver") || memberRole != profileRole) return false
-            val assignedTruck = member.getLong("assignedTruckId")?.toInt()
-            rememberMembership(context, orgId, memberRole, name, assignedTruckId = assignedTruck)
+            rememberMembership(context, orgId, memberRole, name)
             if (memberRole == "manager") loadManagerPin(context, orgId, user.uid)
             true
         } catch (_: Exception) {
@@ -292,8 +312,7 @@ object TenantManager {
             throw IllegalStateException("This Google account is already assigned to another business.")
         }
 
-        val assignedTruckId = (invitation.getLong("assignedTruckId") ?: 0L).toInt()
-        if (assignedTruckId <= 0) throw IllegalStateException("The manager must assign a truck before you can join.")
+        // Truck selection happens when the driver starts a shift, never during invitation.
         val driverId = invitation.getLong("driverId")
             ?: throw IllegalStateException("Invitation is missing the driver profile.")
         val orgRef = db.collection("organizations").document(orgId)
@@ -306,7 +325,6 @@ object TenantManager {
             "uid" to user.uid,
             "name" to driverDisplayName,
             "phone" to phone.trim(),
-            "assignedTruckId" to assignedTruckId,
             "status" to "active"
         ))
         batch.set(orgRef.collection("members").document(user.uid), mapOf(
@@ -315,7 +333,7 @@ object TenantManager {
             "role" to "driver",
             "name" to driverDisplayName,
             "phone" to phone.trim(),
-            "assignedTruckId" to assignedTruckId,
+            "activeTruckId" to 0,
             "earlyLogoutEnabled" to false,
             "status" to "active",
             "createdAt" to now,
@@ -332,7 +350,7 @@ object TenantManager {
         ))
         batch.commit().await()
 
-        rememberMembership(context, orgId, "driver", businessName, code, assignedTruckId)
+        rememberMembership(context, orgId, "driver", businessName, code)
         refreshFleetCache(context)
         return businessName
     }
@@ -394,20 +412,15 @@ object TenantManager {
         val isManager = memberRole == "manager"
         val member = firestore(context).collection("organizations").document(orgId)
             .collection("members").document(uid).get().await()
-        val assignedId = member.getLong("assignedTruckId")?.toInt() ?: assignedTruckId(context)
+        check(member.exists() && member.getString("status") == "active") { "Driver membership is not active." }
+        val assignedId = member.getLong("activeTruckId")?.toInt()?.takeIf { it > 0 }
         val dao = com.example.data.db.AppDatabase.getDatabase(context).fleetDao()
         val root = firestore(context).collection("organizations").document(orgId)
 
-        // Managers can view the full fleet. Drivers fetch only the truck assigned
-        // in their server-side membership document; Firestore rules enforce the same scope.
+        // Drivers can browse every truck in their own business. A truck is claimed
+        // atomically only when a shift starts; Firestore rules enforce tenant scope.
         val truckQuery = root.collection("trucks")
-        val truckSnapshot = if (isManager) {
-            truckQuery.get().await()
-        } else if (assignedId != null) {
-            truckQuery.whereEqualTo("id", assignedId).limit(1).get().await()
-        } else {
-            null
-        }
+        val truckSnapshot = truckQuery.get().await()
         val truckDocs = truckSnapshot?.documents.orEmpty()
 
         truckDocs.forEach { doc ->
