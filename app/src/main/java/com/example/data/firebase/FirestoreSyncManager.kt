@@ -62,9 +62,9 @@ class FirestoreSyncManager(private val context: Context) {
         }
     }
 
-    suspend fun syncTruck(truck: TruckEntity) {
-        if (auth.currentUser == null) return
-        try {
+    suspend fun syncTruck(truck: TruckEntity): Boolean {
+        if (auth.currentUser == null) return false
+        return try {
             val data = hashMapOf(
                 "id" to truck.id,
                 "truckNumber" to truck.id,
@@ -82,8 +82,10 @@ class FirestoreSyncManager(private val context: Context) {
             collection("trucks").document("truck_${truck.id}")
                 .set(data, SetOptions.merge())
                 .await()
+            true
         } catch (e: Exception) {
-            Log.w("FirestoreSync", "Error syncing truck: ${e.message}")
+            Log.w("FirestoreSync", "Error syncing truck: ${e.message}", e)
+            false
         }
     }
 
