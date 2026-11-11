@@ -41,6 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -77,12 +78,14 @@ fun SelfieAttendanceDialog(
     truck: TruckEntity,
     driverName: String = truck.driverName,
     onDismiss: () -> Unit,
-    onConfirmCheckIn: (selfieUri: String?) -> Unit
+    onConfirmCheckIn: (selfieUri: String?) -> Unit,
+    errorMessage: String? = null
 ) {
     val context = LocalContext.current
     var selfieUri by remember { mutableStateOf<Uri?>(null) }
     var generatedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var tempPhotoFile by remember { mutableStateOf<File?>(null) }
+    var submitting by remember { mutableStateOf(false) }
 
     // Camera Launcher with FileProvider
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -153,7 +156,7 @@ fun SelfieAttendanceDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = { if (!submitting) onDismiss() }, enabled = !submitting) {
                         Icon(Icons.Default.Close, contentDescription = "Close")
                     }
                 }
@@ -239,12 +242,17 @@ fun SelfieAttendanceDialog(
                     }
                 }
 
+                if (!errorMessage.isNullOrBlank()) {
+                    Text(errorMessage, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Actions: Capture / Retake & Confirm
                 if (selfieUri == null && generatedBitmap == null) {
                     Button(
-                        onClick = { launchCamera() },
+                        onClick = { if (!submitting) launchCamera() },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(58.dp)
@@ -273,6 +281,7 @@ fun SelfieAttendanceDialog(
 
                         Button(
                             onClick = {
+                                submitting = true
                                 onConfirmCheckIn(selfieUri?.toString())
                             },
                             modifier = Modifier
@@ -284,7 +293,8 @@ fun SelfieAttendanceDialog(
                         ) {
                             Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(22.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("START WORK", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
+                            if (submitting) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                            else Text("START WORK", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
                         }
                     }
                 }
