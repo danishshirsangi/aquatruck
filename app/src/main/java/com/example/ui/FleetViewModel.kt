@@ -405,11 +405,23 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Driver Shift Actions
-    fun startDriverShift(truckId: Int, driverName: String, selfieUri: String?, context: Context) {
+    fun startDriverShift(
+        truckId: Int,
+        driverName: String,
+        selfieUri: String?,
+        context: Context,
+        onResult: (Boolean, String?) -> Unit = { _, _ -> }
+    ) {
         viewModelScope.launch(Dispatchers.IO) {
-            val truck = dao.getTruckByIdDirect(truckId) ?: return@launch
-            if (truck.isShiftActive && _loggedInTruckId.value != truckId) return@launch
-            val now = System.currentTimeMillis()
+            try {
+                val truck = dao.getTruckByIdDirect(truckId)
+                    ?: throw IllegalStateException("Truck not found. Refresh the fleet and try again.")
+                if (TenantManager.role(context) == "driver") {
+                    TenantManager.changeActiveTruck(context, expectedOldId = null, targetId = truckId)
+                } else if (truck.isShiftActive && _loggedInTruckId.value != truckId) {
+                    throw IllegalStateException("This truck is already in use.")
+                }
+                val now = System.currentTimeMillis()
 
             // 1. Lock driver session to this truck & driver identity and persist to SharedPreferences
             _loggedInTruckId.value = truckId
@@ -465,8 +477,14 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 LocationSyncScheduler.enqueue(context)
             }
 
-            // 5. Start adaptive foreground GPS tracking
-            LocationTrackingService.startService(context, truckId, truck.name)
+                // 5. Start adaptive foreground GPS tracking
+                LocationTrackingService.startService(context, truckId, truck.name)
+                withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(true, null) }
+            } catch (e: Exception) {
+                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    onResult(false, e.message ?: "Unable to start shift. Please try again.")
+                }
+            }
         }
     }
 
@@ -549,6 +567,13 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
 
     fun endDriverShift(truckId: Int, context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
+            if (TenantManager.role(context) == "driver") {
+                try {
+                    TenantManager.changeActiveTruck(context, expectedOldId = truckId, targetId = null)
+                } catch (e: Exception) {
+                    return@launch
+                }
+            }
             val now = System.currentTimeMillis()
 
             // 1. Complete active attendance record
