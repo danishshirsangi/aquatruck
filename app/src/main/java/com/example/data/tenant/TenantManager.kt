@@ -348,9 +348,17 @@ object TenantManager {
         val dao = com.example.data.db.AppDatabase.getDatabase(context).fleetDao()
         val root = firestore(context).collection("organizations").document(orgId)
 
-        // Drivers can select another available tanker for a shift. Their identity and
-        // business membership remain fixed; only the vehicle selection is flexible.
-        val truckDocs = root.collection("trucks").get().await().documents
+        // Managers can view the full fleet. Drivers fetch only the truck assigned
+        // in their server-side membership document; Firestore rules enforce the same scope.
+        val truckQuery = root.collection("trucks")
+        val truckSnapshot = if (isManager) {
+            truckQuery.get().await()
+        } else if (assignedId != null) {
+            truckQuery.whereEqualTo("id", assignedId).limit(1).get().await()
+        } else {
+            null
+        }
+        val truckDocs = truckSnapshot?.documents.orEmpty()
 
         truckDocs.forEach { doc ->
             val id = (doc.getLong("id") ?: doc.id.removePrefix("truck_").toLongOrNull() ?: return@forEach).toInt()
