@@ -46,7 +46,7 @@ class FirestoreSyncManager(private val context: Context) {
                 .collection("truck_subscriptions").document(truckId.toString())
                 .set(hashMapOf(
                     "truckId" to truckId,
-                    "amountPaise" to 9900,
+                    "amountPaise" to 14900,
                     "currency" to "INR",
                     "billingPeriod" to "monthly",
                     "mode" to "test",
