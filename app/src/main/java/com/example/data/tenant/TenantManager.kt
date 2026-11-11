@@ -430,7 +430,7 @@ object TenantManager {
 
             if (oldRef != null && oldId != targetId) {
                 tx.update(oldRef, mapOf(
-                    "activeDriverUid" to "", "lastDriverUid" to uid, "isShiftActive" to false,
+                    "activeDriverUid" to "", "isShiftActive" to false,
                     "statusText" to "Off Duty", "currentSpeedKmh" to 0.0,
                     "lastUpdated" to now
                 ))

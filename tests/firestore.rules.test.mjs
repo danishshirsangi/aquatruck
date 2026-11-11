@@ -195,7 +195,6 @@ test("driver can switch to a selected available truck when local session is empt
 
     transaction.update(oldTruckRef, {
       activeDriverUid: "",
-      lastDriverUid: DRIVER_UID,
       isShiftActive: false,
       statusText: "Off Duty",
       currentSpeedKmh: 0,
