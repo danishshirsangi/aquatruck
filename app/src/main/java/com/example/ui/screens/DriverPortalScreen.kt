@@ -164,6 +164,7 @@ fun DriverPortalScreen(
     val isPlaying by viewModel.audioPlayer.isPlaying.collectAsState()
 
     var showSelfieDialog by remember { mutableStateOf(false) }
+    var shiftStartError by remember { mutableStateOf<String?>(null) }
     var switchTruckMenuExpanded by remember { mutableStateOf(false) }
 
     // Pulse animation for recording mic
@@ -1040,9 +1041,16 @@ fun DriverPortalScreen(
             driverName = effectiveDriverName,
             onDismiss = { showSelfieDialog = false },
             onConfirmCheckIn = { selfieUri ->
-                viewModel.startDriverShift(truckForSelfie.id, effectiveDriverName, selfieUri, context)
-                showSelfieDialog = false
-            }
+                viewModel.startDriverShift(truckForSelfie.id, effectiveDriverName, selfieUri, context) { success, message ->
+                    if (success) {
+                        shiftStartError = null
+                        showSelfieDialog = false
+                    } else {
+                        shiftStartError = message
+                    }
+                }
+            },
+            errorMessage = shiftStartError
         )
     }
 }
