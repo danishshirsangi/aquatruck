@@ -39,9 +39,40 @@ service cloud.firestore {
       return memberDoc(orgId).data.assignedTruckId;
     }
 
-    function ownsTruck(orgId, data) {
+    function activeTruckPath(orgId, truckId) {
+      return /databases/$(database)/documents/organizations/$(orgId)/trucks/truck_$(truckId);
+    }
+
+    function isActiveDriverForTruck(orgId, truckId) {
       return isDriver(orgId)
-        && data.truckId is int;
+        && truckId is int
+        && memberDoc(orgId).data.activeTruckId == truckId
+        && exists(activeTruckPath(orgId, truckId))
+        && get(activeTruckPath(orgId, truckId)).data.activeDriverUid == request.auth.uid;
+    }
+
+    function memberActiveTruckAfter(orgId) {
+      return getAfter(memberPath(orgId, request.auth.uid)).data.activeTruckId;
+    }
+
+    function isValidTruckClaimTransition(orgId) {
+      return isDriver(orgId)
+        && request.resource.data.id is int
+        && (
+          (
+            (!resource.data.keys().hasAny(["activeDriverUid"]) || resource.data.activeDriverUid == "")
+            && request.resource.data.activeDriverUid == request.auth.uid
+            && memberActiveTruckAfter(orgId) == request.resource.data.id
+            && request.resource.data.isShiftActive == true
+          )
+          ||
+          (
+            resource.data.activeDriverUid == request.auth.uid
+            && request.resource.data.activeDriverUid == ""
+            && memberActiveTruckAfter(orgId) != resource.data.id
+            && request.resource.data.isShiftActive == false
+          )
+        );
     }
 
     function matchingActiveMembership(data) {
@@ -152,15 +183,20 @@ service cloud.firestore {
       }
 
       match /trucks/{truckId} {
+        // Drivers may browse fleet availability to choose a truck, but only managers
+        // can create or remove fleet assets.
         allow read: if isMember(orgId);
         allow create, delete: if isManager(orgId);
         allow update: if isManager(orgId) || (
           isDriver(orgId)
-          && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly([
-              "currentLat", "currentLng", "currentSpeedKmh",
-              "isShiftActive", "statusText", "lastUpdated", "driverName"
-            ])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "activeDriverUid", "isShiftActive", "statusText", "lastUpdated",
+            "currentLat", "currentLng", "currentSpeedKmh", "driverName"
+          ])
+          && (
+            isActiveDriverForTruck(orgId, resource.data.id)
+            || isValidTruckClaimTransition(orgId)
+          )
         );
       }
 
@@ -199,32 +235,52 @@ service cloud.firestore {
       }
 
       match /location_points/{pointId} {
-        allow read: if isMember(orgId);
-        allow create: if isMember(orgId) && request.resource.data.truckId is int;
+        allow read: if isManager(orgId)
+          || (isDriver(orgId) && resource.data.truckId == memberDoc(orgId).data.activeTruckId);
+        allow create: if isManager(orgId) || (
+          request.resource.data.truckId is int
+          && isActiveDriverForTruck(orgId, request.resource.data.truckId)
+        );
         allow update, delete: if isManager(orgId);
       }
 
       match /stop_records/{stopId} {
-        allow read: if isMember(orgId);
-        allow create: if isMember(orgId) && request.resource.data.truckId is int;
+        allow read: if isManager(orgId)
+          || (isDriver(orgId) && resource.data.truckId == memberDoc(orgId).data.activeTruckId);
+        allow create: if isManager(orgId) || (
+          request.resource.data.truckId is int
+          && isActiveDriverForTruck(orgId, request.resource.data.truckId)
+        );
         allow update, delete: if isManager(orgId);
       }
 
       match /attendance/{attendanceId} {
-        allow read: if isMember(orgId);
-        allow create, update: if isMember(orgId) && request.resource.data.truckId is int;
+        allow read: if isManager(orgId)
+          || (isDriver(orgId) && resource.data.truckId == memberDoc(orgId).data.activeTruckId);
+        allow create, update: if isManager(orgId) || (
+          request.resource.data.truckId is int
+          && isActiveDriverForTruck(orgId, request.resource.data.truckId)
+        );
         allow delete: if isManager(orgId);
       }
 
       match /voice_delivery_notes/{noteId} {
-        allow read: if isMember(orgId);
-        allow create: if isMember(orgId) && request.resource.data.truckId is int;
+        allow read: if isManager(orgId)
+          || (isDriver(orgId) && resource.data.truckId == memberDoc(orgId).data.activeTruckId);
+        allow create: if isManager(orgId) || (
+          request.resource.data.truckId is int
+          && isActiveDriverForTruck(orgId, request.resource.data.truckId)
+        );
         allow update, delete: if isManager(orgId);
       }
 
       match /delivery_proofs/{proofId} {
-        allow read: if isMember(orgId);
-        allow create: if isMember(orgId) && request.resource.data.truckId is int;
+        allow read: if isManager(orgId)
+          || (isDriver(orgId) && resource.data.truckId == memberDoc(orgId).data.activeTruckId);
+        allow create: if isManager(orgId) || (
+          request.resource.data.truckId is int
+          && isActiveDriverForTruck(orgId, request.resource.data.truckId)
+        );
         allow update, delete: if isManager(orgId);
       }
     }
