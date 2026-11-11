@@ -166,10 +166,19 @@ service cloud.firestore {
               && getAfter(truckPath(orgId, "truck_" + string(request.resource.data.activeTruckId))).data.activeDriverUid == request.auth.uid
               && getAfter(truckPath(orgId, "truck_" + string(request.resource.data.activeTruckId))).data.isShiftActive == true)
             || (request.resource.data.activeTruckId == 0
-              && resource.data.activeTruckId is int
-              && resource.data.activeTruckId > 0
-              && get(truckPath(orgId, "truck_" + string(resource.data.activeTruckId))).data.activeDriverUid == request.auth.uid
-              && getAfter(truckPath(orgId, "truck_" + string(resource.data.activeTruckId))).data.activeDriverUid == "")
+              && (
+                (resource.data.activeTruckId is int
+                  && resource.data.activeTruckId > 0
+                  && get(truckPath(orgId, "truck_" + string(resource.data.activeTruckId))).data.activeDriverUid == request.auth.uid)
+                || (!("activeTruckId" in resource.data)
+                  && resource.data.assignedTruckId is int
+                  && resource.data.assignedTruckId > 0
+                  && get(truckPath(orgId, "truck_" + string(resource.data.assignedTruckId))).data.activeDriverUid == ""
+                  && get(truckPath(orgId, "truck_" + string(resource.data.assignedTruckId))).data.isShiftActive == true)
+              )
+              && getAfter(truckPath(orgId, "truck_" + string(
+                resource.data.activeTruckId is int ? resource.data.activeTruckId : resource.data.assignedTruckId
+              ))).data.activeDriverUid == "")
           )
         );
         allow delete: if isManager(orgId);
@@ -211,7 +220,10 @@ service cloud.firestore {
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                 "activeDriverUid", "isShiftActive", "statusText", "lastUpdated"
               ]))
-            || (resource.data.activeDriverUid == request.auth.uid
+            || ((resource.data.activeDriverUid == request.auth.uid
+                || ((!("activeDriverUid" in resource.data) || resource.data.activeDriverUid == "")
+                  && memberDoc(orgId).data.assignedTruckId == resource.data.id
+                  && resource.data.isShiftActive == true))
               && request.resource.data.activeDriverUid == ""
               && request.resource.data.isShiftActive == false
               && getAfter(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.activeTruckId != resource.data.id
