@@ -93,16 +93,25 @@ jobs:
 
       - name: Upload debug APK
         if: success()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: aquatrack-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
 
+      - name: Add APK download link to workflow summary
+        if: success()
+        run: |
+          echo "## AquaTruck APK" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Download aquatrack-debug-apk.zip](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Built from commit $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload unit test reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: aquatrack-unit-test-reports
           path: app/build/reports/tests/testDebugUnitTest/
