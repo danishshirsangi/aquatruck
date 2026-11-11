@@ -190,7 +190,7 @@ service cloud.firestore {
                 "currentLat", "currentLng", "currentSpeedKmh",
                 "statusText", "lastUpdated", "driverName"
               ]))
-            || (resource.data.activeDriverUid == ""
+            || ((!("activeDriverUid" in resource.data) || resource.data.activeDriverUid == "")
               && resource.data.isShiftActive != true
               && request.resource.data.activeDriverUid == request.auth.uid
               && request.resource.data.isShiftActive == true
