@@ -67,6 +67,10 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
+    const declaredLength = Number(request.headers.get("content-length") ?? "0");
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BYTES + 128 * 1024) {
+      return json({ error: "Audio request exceeds the 20 MB limit" }, 413);
+    }
     const { uid, token } = await verifyFirebaseToken(request);
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -102,6 +106,7 @@ Deno.serve(async (request) => {
 
     if (!safePart(orgId) || !Number.isSafeInteger(truckId) || truckId <= 0 ||
         !Number.isSafeInteger(timestamp) || timestamp <= 0 ||
+        timestamp > Date.now() + 5 * 60 * 1000 ||
         !["m4a", "mp4", "wav"].includes(extension)) {
       return json({ error: "Invalid audio reference" }, 400);
     }
@@ -118,8 +123,11 @@ Deno.serve(async (request) => {
         return json({ error: "Audio must be between 1 byte and 20 MB" }, 400);
       }
       const expectedType = extension === "wav" ? "audio/wav" : "audio/mp4";
-      if (file.type && !file.type.startsWith("audio/")) {
-        return json({ error: "Only audio files are accepted" }, 400);
+      const allowedTypes = extension === "wav"
+        ? ["audio/wav", "audio/x-wav"]
+        : ["audio/mp4", "audio/x-m4a", "audio/m4a"];
+      if (file.type && !allowedTypes.includes(file.type.toLowerCase())) {
+        return json({ error: "Audio content type does not match the selected format" }, 400);
       }
       const { error } = await storage.storage.from(BUCKET).upload(objectPath, file, {
         contentType: expectedType,
