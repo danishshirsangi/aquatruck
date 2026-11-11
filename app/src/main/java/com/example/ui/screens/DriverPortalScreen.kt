@@ -217,7 +217,7 @@ fun DriverPortalScreen(
                             color = OceanNavyPrimary
                         )
                         Text(
-                            text = "Please ask your fleet manager to register your driver profile and assign a truck before starting a shift.",
+                            text = "Please ask your fleet manager to register your driver profile and add trucks to the business. You can choose any available truck when you start your shift.",
                             textAlign = TextAlign.Center,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
