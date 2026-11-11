@@ -230,6 +230,8 @@ fun ManagerPortalScreen(
             5 -> ManagerShiftSettingsScreen(viewModel = viewModel)
             6 -> ManagerDriverAssignmentsScreen(
                 drivers = drivers,
+                trucks = trucks,
+                onAssignTruck = { driverId, truckId -> viewModel.assignDriverToTruck(driverId, truckId) },
                 onEarlyLogoutChanged = { driverId, enabled -> viewModel.setDriverEarlyLogout(driverId, enabled) }
             )
         }

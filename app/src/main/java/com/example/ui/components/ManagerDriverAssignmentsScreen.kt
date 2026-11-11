@@ -38,8 +38,11 @@ import com.example.data.model.TruckEntity
 @Composable
 fun ManagerDriverAssignmentsScreen(
     drivers: List<DriverEntity>,
+    trucks: List<TruckEntity>,
+    onAssignTruck: (Long, Int) -> Unit,
     onEarlyLogoutChanged: (Long, Boolean) -> Unit
 ) {
+    var expandedDriverId by remember { mutableStateOf<Long?>(null) }
     var visibleQrDriverId by remember { mutableStateOf<Long?>(null) }
     val clipboard = LocalClipboardManager.current
 
@@ -48,9 +51,9 @@ fun ManagerDriverAssignmentsScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
-            Text("Drivers", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("Registered Drivers", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text(
-                "Drivers choose an available truck when they start a shift. Register drivers with their phone number and share their one-time invitation code.",
+                "Drivers join using their one-time invitation code or QR code. Truck selection is completely independent — drivers choose which available truck to drive at the start of each shift.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -89,6 +92,22 @@ fun ManagerDriverAssignmentsScreen(
                             if (visibleQrDriverId == driver.id) DriverInviteQrCode(code)
                         }
                     }
+
+                    val currentDrivingTruck = trucks.firstOrNull { it.isShiftActive && it.driverName.equals(driver.name, ignoreCase = true) }
+                    if (currentDrivingTruck != null) {
+                        Text(
+                            "Current Shift: On duty driving ${currentDrivingTruck.name} (${currentDrivingTruck.plateNumber})",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    } else {
+                        Text(
+                            "Current Shift: Off Duty (can pick any available truck on next shift)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Allow early logout", fontWeight = FontWeight.SemiBold)
@@ -108,6 +127,7 @@ fun ManagerDriverAssignmentsScreen(
         }
     }
 }
+
 
 @Composable
 private fun DriverInviteQrCode(code: String) {

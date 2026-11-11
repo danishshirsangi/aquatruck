@@ -128,43 +128,13 @@ object TenantManager {
             val orgId = snapshot.getString("organizationId") ?: return false
             val profileRole = snapshot.getString("role") ?: return false
             val name = snapshot.getString("businessName") ?: "My Business"
-            val root = firestore(context).collection("organizations").document(orgId)
-            var member = root.collection("members").document(user.uid).get().await()
-            if (!member.exists() && profileRole == "driver") {
-                // Repair legacy driver accounts whose user profile exists but whose
-                // membership document was never created. The claimed invitation is
-                // the proof that this account joined this business.
-                val driver = root.collection("drivers").whereEqualTo("uid", user.uid).limit(1).get().await()
-                    .documents.firstOrNull() ?: return false
-                val invitationId = driver.getString("invitationCode") ?: return false
-                val driverId = driver.getLong("id") ?: return false
-                val invitation = firestore(context).collection("driver_invitations").document(invitationId).get().await()
-                if (invitation.getString("uid") != user.uid || invitation.getBoolean("active") != false) return false
-                root.collection("members").document(user.uid).set(mapOf(
-                    "uid" to user.uid, "driverId" to driverId, "role" to "driver",
-                    "name" to (driver.getString("name") ?: snapshot.getString("displayName") ?: "Driver"),
-                    "phone" to (driver.getString("phone") ?: ""),
-                    "earlyLogoutEnabled" to (driver.getBoolean("earlyLogoutEnabled") ?: false),
-                    "status" to "active", "createdAt" to System.currentTimeMillis(),
-                    "invitationId" to invitationId, "activeTruckId" to 0
-                )).await()
-                member = root.collection("members").document(user.uid).get().await()
-            } else if (!member.exists() && profileRole == "manager") {
-                // Restore a legacy manager membership only when the organisation's
-                // ownerUid and the signed-in user's existing profile agree.
-                val org = root.get().await()
-                if (org.getString("ownerUid") != user.uid) return false
-                root.collection("members").document(user.uid).set(mapOf(
-                    "uid" to user.uid, "role" to "manager",
-                    "name" to (snapshot.getString("displayName") ?: "Manager"),
-                    "status" to "active", "createdAt" to System.currentTimeMillis()
-                )).await()
-                member = root.collection("members").document(user.uid).get().await()
-            }
+            val member = firestore(context).collection("organizations").document(orgId)
+                .collection("members").document(user.uid).get().await()
             if (!member.exists() || member.getString("status") != "active") return false
             val memberRole = member.getString("role") ?: return false
             if (memberRole !in setOf("manager", "driver") || memberRole != profileRole) return false
-            rememberMembership(context, orgId, memberRole, name)
+            val assignedTruck = member.getLong("assignedTruckId")?.toInt()
+            rememberMembership(context, orgId, memberRole, name, assignedTruckId = assignedTruck)
             if (memberRole == "manager") loadManagerPin(context, orgId, user.uid)
             true
         } catch (_: Exception) {
@@ -322,7 +292,7 @@ object TenantManager {
             throw IllegalStateException("This Google account is already assigned to another business.")
         }
 
-        // Truck selection happens when the driver starts a shift, never during invitation.
+        val assignedTruckId = (invitation.getLong("assignedTruckId") ?: 0L).toInt()
         val driverId = invitation.getLong("driverId")
             ?: throw IllegalStateException("Invitation is missing the driver profile.")
         val orgRef = db.collection("organizations").document(orgId)
@@ -335,7 +305,7 @@ object TenantManager {
             "uid" to user.uid,
             "name" to driverDisplayName,
             "phone" to phone.trim(),
-            "assignedTruckId" to 0,
+            "assignedTruckId" to assignedTruckId,
             "status" to "active"
         ))
         batch.set(orgRef.collection("members").document(user.uid), mapOf(
@@ -344,7 +314,7 @@ object TenantManager {
             "role" to "driver",
             "name" to driverDisplayName,
             "phone" to phone.trim(),
-            "activeTruckId" to 0,
+            "assignedTruckId" to assignedTruckId,
             "earlyLogoutEnabled" to false,
             "status" to "active",
             "createdAt" to now,
@@ -361,7 +331,7 @@ object TenantManager {
         ))
         batch.commit().await()
 
-        rememberMembership(context, orgId, "driver", businessName, code)
+        rememberMembership(context, orgId, "driver", businessName, code, assignedTruckId)
         refreshFleetCache(context)
         return businessName
     }
@@ -383,18 +353,12 @@ object TenantManager {
             check(member.getString("role") == "driver" && member.getString("status") == "active") {
                 "Driver membership is not active."
             }
-            val active = member.getLong("activeTruckId")?.toInt()?.takeIf { it > 0 }
-            val legacyActive = active == null && expectedOldId != null &&
-                member.getLong("assignedTruckId")?.toInt() == expectedOldId
-            check(active == expectedOldId || legacyActive) {
-                "Your truck assignment changed. Refresh and retry."
-            }
+            val active = member.getLong("activeTruckId")?.toInt()
+            check(active == expectedOldId) { "Your truck assignment changed. Refresh and retry." }
             val old = oldRef?.let { tx.get(it) }
             val target = targetRef?.let { tx.get(it) }
             if (old != null) {
-                val legacyOwned = legacyActive && old.getString("activeDriverUid").isNullOrBlank() &&
-                    old.getBoolean("isShiftActive") == true
-                check(old.exists() && (old.getString("activeDriverUid") == uid || legacyOwned)) {
+                check(old.exists() && old.getString("activeDriverUid") == uid) {
                     "You no longer own the previous truck."
                 }
             }
@@ -429,16 +393,15 @@ object TenantManager {
         val isManager = memberRole == "manager"
         val member = firestore(context).collection("organizations").document(orgId)
             .collection("members").document(uid).get().await()
-        check(member.exists() && member.getString("status") == "active") { "Driver membership is not active." }
-        val assignedId = member.getLong("activeTruckId")?.toInt()?.takeIf { it > 0 }
+        val assignedId = member.getLong("assignedTruckId")?.toInt() ?: assignedTruckId(context)
         val dao = com.example.data.db.AppDatabase.getDatabase(context).fleetDao()
         val root = firestore(context).collection("organizations").document(orgId)
 
-        // Drivers can browse every truck in their own business. A truck is claimed
-        // atomically only when a shift starts; Firestore rules enforce tenant scope.
+        // Both managers and drivers browse the full fleet. Drivers select which truck
+        // to drive dynamically at shift start.
         val truckQuery = root.collection("trucks")
         val truckSnapshot = truckQuery.get().await()
-        val truckDocs = truckSnapshot?.documents.orEmpty()
+        val truckDocs = truckSnapshot.documents
 
         truckDocs.forEach { doc ->
             val id = (doc.getLong("id") ?: doc.id.removePrefix("truck_").toLongOrNull() ?: return@forEach).toInt()
@@ -482,14 +445,8 @@ object TenantManager {
         }
 
         val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
-        val locationDocs = if (isManager) {
-            root.collection("location_points").whereGreaterThanOrEqualTo("timestamp", cutoff).get().await().documents
-        } else if (assignedId != null) {
-            root.collection("location_points")
-                .whereGreaterThanOrEqualTo("timestamp", cutoff)
-                .whereEqualTo("truckId", assignedId).get().await().documents
-        } else emptyList()
-        locationDocs.forEach { doc ->
+        val locationsQuery = root.collection("location_points").whereGreaterThanOrEqualTo("timestamp", cutoff)
+        locationsQuery.get().await().documents.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val timestamp = doc.getLong("timestamp") ?: return@forEach
             val localId = stableLocalRecordId(truckId, timestamp)
@@ -506,10 +463,8 @@ object TenantManager {
         }
 
         val stopCollection = root.collection("stop_records")
-        val stopDocs = if (isManager) stopCollection.get().await().documents
-            else if (assignedId != null) stopCollection.whereEqualTo("truckId", assignedId).get().await().documents
-            else emptyList()
-        stopDocs.forEach { doc ->
+        val stopSnapshot = stopCollection.get().await()
+        stopSnapshot.documents.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val startTime = doc.getLong("startTime") ?: return@forEach
             dao.insertStop(StopRecord(
@@ -527,10 +482,8 @@ object TenantManager {
         }
 
         val voiceCollection = root.collection("voice_delivery_notes")
-        val voiceDocs = if (isManager) voiceCollection.get().await().documents
-            else if (assignedId != null) voiceCollection.whereEqualTo("truckId", assignedId).get().await().documents
-            else emptyList()
-        voiceDocs.forEach { doc ->
+        val voiceSnapshot = voiceCollection.get().await()
+        voiceSnapshot.documents.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val timestamp = doc.getLong("timestamp") ?: return@forEach
             val audioPath = doc.getString("audioFilePath") ?: ""
@@ -549,10 +502,8 @@ object TenantManager {
         }
 
         val attendanceCollection = root.collection("attendance")
-        val attendanceDocs = if (isManager) attendanceCollection.get().await().documents
-            else if (assignedId != null) attendanceCollection.whereEqualTo("truckId", assignedId).get().await().documents
-            else emptyList()
-        attendanceDocs.forEach { doc ->
+        val attendanceSnapshot = attendanceCollection.get().await()
+        attendanceSnapshot.documents.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val checkInTime = doc.getLong("checkInTime") ?: return@forEach
             val checkOut = doc.getLong("checkOutTime") ?: 0L
@@ -633,7 +584,7 @@ object TenantManager {
                     close(error)
                     return@addSnapshotListener
                 }
-                trySend(snapshot?.getLong("activeTruckId")?.toInt()?.takeIf { it > 0 })
+                trySend(snapshot?.getLong("assignedTruckId")?.toInt())
             }
         awaitClose { listener.remove() }
     }

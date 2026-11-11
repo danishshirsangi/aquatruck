@@ -217,7 +217,7 @@ fun DriverPortalScreen(
                             color = OceanNavyPrimary
                         )
                         Text(
-                            text = "Please ask your fleet manager to register your driver profile and add trucks to the business. You can choose any available truck when you start your shift.",
+                            text = "Please ask your fleet manager to register your driver profile and assign a truck before starting a shift.",
                             textAlign = TextAlign.Center,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -531,7 +531,7 @@ fun DriverPortalScreen(
 
                                 if (truck.isShiftActive) {
                                     Text(
-                                        "This truck is already in use. Please choose another available truck.",
+                                        "This truck already has an active shift. Ask your manager to assign an available truck.",
                                         color = MaterialTheme.colorScheme.error,
                                         style = MaterialTheme.typography.bodySmall,
                                         textAlign = TextAlign.Center
