@@ -73,7 +73,7 @@ beforeEach(async () => testEnv.clearFirestore());
 after(async () => testEnv.cleanup());
 
 test("manager creates business and driver invitation", async () => {
-  const { managerDb } = await registerManagerBusiness();
+  const { db: managerDb } = await registerManagerBusiness();
   await registerDriverAndInvite(managerDb);
   const orgSnap = await assertSucceeds(getDoc(doc(managerDb, "organizations", ORG_ID)));
   assert.equal(orgSnap.data().businessName, "Test Water Company");
@@ -102,11 +102,11 @@ test("active driver uploads GPS points and manager reads route history", async (
 });
 
 test("missing membership rejects GPS upload", async () => {
-  const { managerContext } = await registerManagerBusiness();
+  const { managerContext, db: managerDb } = await registerManagerBusiness();
   const stranger = testEnv.authenticatedContext("driver-without-membership");
   const db = dbFor(stranger);
   await assertFails(setDoc(doc(db, "organizations", ORG_ID, "location_points", "missing-member"), gpsPoint(90)));
-  await assertSucceeds(getDoc(doc(dbFor(managerContext), "organizations", ORG_ID)));
+  await assertSucceeds(getDoc(doc(managerDb, "organizations", ORG_ID)));
 });
 
 test("driver cannot upload GPS for a different assigned truck", async () => {
