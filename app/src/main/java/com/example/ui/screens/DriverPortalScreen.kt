@@ -531,7 +531,7 @@ fun DriverPortalScreen(
 
                                 if (truck.isShiftActive) {
                                     Text(
-                                        "This truck already has an active shift. Ask your manager to assign an available truck.",
+                                        "This truck is already in use. Please choose another available truck.",
                                         color = MaterialTheme.colorScheme.error,
                                         style = MaterialTheme.typography.bodySmall,
                                         textAlign = TextAlign.Center
