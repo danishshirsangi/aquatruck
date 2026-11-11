@@ -430,7 +430,7 @@ object TenantManager {
 
             if (oldRef != null && oldId != targetId) {
                 tx.update(oldRef, mapOf(
-                    "activeDriverUid" to "", "isShiftActive" to false,
+                    "activeDriverUid" to "", "lastDriverUid" to uid, "isShiftActive" to false,
                     "statusText" to "Off Duty", "currentSpeedKmh" to 0.0,
                     "lastUpdated" to now
                 ))
@@ -592,6 +592,60 @@ object TenantManager {
                 isCompleted = doc.getBoolean("isCompleted") ?: (checkOut > 0L)
             ))
         }
+    }
+
+    /**
+     * Refreshes manager live positions from tenant-scoped Firestore data.
+     * Full route history is hydrated by refreshFleetCache; this poll keeps the
+     * newest breadcrumbs and truck coordinates current while the manager portal is open.
+     */
+    suspend fun refreshManagerLiveTracking(context: Context) {
+        if (role(context) != "manager") return
+        val orgId = organizationId(context) ?: return
+        val uid = Firebase.auth.currentUser?.uid ?: return
+        val root = firestore(context).collection("organizations").document(orgId)
+        val dao = com.example.data.db.AppDatabase.getDatabase(context).fleetDao()
+
+        val trucks = root.collection("trucks").get().await()
+        trucks.documents.forEach { doc ->
+            val id = (doc.getLong("id") ?: doc.id.removePrefix("truck_").toLongOrNull() ?: return@forEach).toInt()
+            dao.insertTruck(com.example.data.model.TruckEntity(
+                id = id,
+                name = doc.getString("name") ?: "Truck $id",
+                plateNumber = doc.getString("plateNumber") ?: "",
+                driverName = doc.getString("driverName") ?: "",
+                capacityLiters = (doc.getLong("capacityLiters") ?: 0L).toInt(),
+                currentLat = doc.getDouble("currentLat") ?: 0.0,
+                currentLng = doc.getDouble("currentLng") ?: 0.0,
+                currentSpeedKmh = (doc.getDouble("currentSpeedKmh") ?: 0.0).toFloat(),
+                isShiftActive = doc.getBoolean("isShiftActive") ?: false,
+                statusText = doc.getString("statusText") ?: "Off Duty",
+                lastUpdated = doc.getLong("lastUpdated") ?: System.currentTimeMillis()
+            ))
+        }
+
+        val points = root.collection("location_points")
+            .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+            .limit(1000)
+            .get().await()
+        points.documents.forEach { doc ->
+            val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
+            val timestamp = doc.getLong("timestamp") ?: return@forEach
+            dao.insertLocationPoint(LocationPoint(
+                id = stableLocalRecordId(truckId, timestamp),
+                truckId = truckId,
+                latitude = doc.getDouble("latitude") ?: 0.0,
+                longitude = doc.getDouble("longitude") ?: 0.0,
+                speedKmh = (doc.getDouble("speedKmh") ?: 0.0).toFloat(),
+                accuracyMeters = (doc.getDouble("accuracyMeters") ?: 5.0).toFloat(),
+                timestamp = timestamp,
+                isSynced = true
+            ))
+        }
+        android.util.Log.i(
+            "TenantManager",
+            "Refreshed live tracking for org=$orgId manager=$uid: trucks=${trucks.size()}, points=${points.size()}"
+        )
     }
 
     private fun stableLocalRecordId(truckId: Int, timestamp: Long): Long =
