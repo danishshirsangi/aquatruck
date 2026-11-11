@@ -465,9 +465,14 @@ object TenantManager {
         }
 
         val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
-        var locationsQuery = root.collection("location_points").whereGreaterThanOrEqualTo("timestamp", cutoff)
-        if (!isManager && assignedId != null) locationsQuery = locationsQuery.whereEqualTo("truckId", assignedId)
-        locationsQuery.get().await().documents.forEach { doc ->
+        val locationDocs = if (isManager) {
+            root.collection("location_points").whereGreaterThanOrEqualTo("timestamp", cutoff).get().await().documents
+        } else if (assignedId != null) {
+            root.collection("location_points")
+                .whereGreaterThanOrEqualTo("timestamp", cutoff)
+                .whereEqualTo("truckId", assignedId).get().await().documents
+        } else emptyList()
+        locationDocs.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val timestamp = doc.getLong("timestamp") ?: return@forEach
             val localId = stableLocalRecordId(truckId, timestamp)
@@ -484,10 +489,10 @@ object TenantManager {
         }
 
         val stopCollection = root.collection("stop_records")
-        val stopSnapshot = if (isManager) stopCollection.get().await()
-            else if (assignedId != null) stopCollection.whereEqualTo("truckId", assignedId).get().await()
-            else null
-        stopSnapshot?.documents?.forEach { doc ->
+        val stopDocs = if (isManager) stopCollection.get().await().documents
+            else if (assignedId != null) stopCollection.whereEqualTo("truckId", assignedId).get().await().documents
+            else emptyList()
+        stopDocs.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val startTime = doc.getLong("startTime") ?: return@forEach
             dao.insertStop(StopRecord(
@@ -505,10 +510,10 @@ object TenantManager {
         }
 
         val voiceCollection = root.collection("voice_delivery_notes")
-        val voiceSnapshot = if (isManager) voiceCollection.get().await()
-            else if (assignedId != null) voiceCollection.whereEqualTo("truckId", assignedId).get().await()
-            else null
-        voiceSnapshot?.documents?.forEach { doc ->
+        val voiceDocs = if (isManager) voiceCollection.get().await().documents
+            else if (assignedId != null) voiceCollection.whereEqualTo("truckId", assignedId).get().await().documents
+            else emptyList()
+        voiceDocs.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val timestamp = doc.getLong("timestamp") ?: return@forEach
             val audioPath = doc.getString("audioFilePath") ?: ""
@@ -527,10 +532,10 @@ object TenantManager {
         }
 
         val attendanceCollection = root.collection("attendance")
-        val attendanceSnapshot = if (isManager) attendanceCollection.get().await()
-            else if (assignedId != null) attendanceCollection.whereEqualTo("truckId", assignedId).get().await()
-            else null
-        attendanceSnapshot?.documents?.forEach { doc ->
+        val attendanceDocs = if (isManager) attendanceCollection.get().await().documents
+            else if (assignedId != null) attendanceCollection.whereEqualTo("truckId", assignedId).get().await().documents
+            else emptyList()
+        attendanceDocs.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val checkInTime = doc.getLong("checkInTime") ?: return@forEach
             val checkOut = doc.getLong("checkOutTime") ?: 0L
