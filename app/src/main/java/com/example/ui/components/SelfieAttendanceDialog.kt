@@ -43,6 +43,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,6 +87,7 @@ fun SelfieAttendanceDialog(
     var generatedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var tempPhotoFile by remember { mutableStateOf<File?>(null) }
     var submitting by remember { mutableStateOf(false) }
+    LaunchedEffect(errorMessage) { if (!errorMessage.isNullOrBlank()) submitting = false }
 
     // Camera Launcher with FileProvider
     val cameraLauncher = rememberLauncherForActivityResult(
