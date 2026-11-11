@@ -1,35 +1,72 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function memberDoc(orgId) {
-      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
+    function signedIn() {
+      return request.auth != null;
     }
+
+    function memberPath(orgId, uid) {
+      return /databases/$(database)/documents/organizations/$(orgId)/members/$(uid);
+    }
+
+    function memberDoc(orgId) {
+      return get(memberPath(orgId, request.auth.uid));
+    }
+
     function isMember(orgId) {
       return signedIn()
-        && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid))
-        && memberDoc(orgId).data.status == "active";
+        && exists(memberPath(orgId, request.auth.uid))
+        && memberDoc(orgId).data.status == "active"
+        && memberDoc(orgId).data.role in ["manager", "driver"];
     }
+
     function isManager(orgId) {
       return isMember(orgId) && memberDoc(orgId).data.role == "manager";
     }
+
     function isManagerAfter(orgId) {
       return signedIn()
-        && existsAfter(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid))
-        && getAfter(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data.role == "manager";
+        && existsAfter(memberPath(orgId, request.auth.uid))
+        && getAfter(memberPath(orgId, request.auth.uid)).data.status == "active"
+        && getAfter(memberPath(orgId, request.auth.uid)).data.role == "manager";
     }
+
     function isDriver(orgId) {
       return isMember(orgId) && memberDoc(orgId).data.role == "driver";
     }
-    function assignedTruckId(orgId) { return memberDoc(orgId).data.assignedTruckId; }
+
+    function assignedTruckId(orgId) {
+      return memberDoc(orgId).data.assignedTruckId;
+    }
+
     function ownsTruck(orgId, data) {
-      return isDriver(orgId) && data.truckId == assignedTruckId(orgId);
+      return isDriver(orgId)
+        && data.truckId is int
+        && data.truckId == assignedTruckId(orgId);
+    }
+
+    function matchingActiveMembership(data) {
+      return signedIn()
+        && data.uid == request.auth.uid
+        && data.organizationId is string
+        && data.role in ["manager", "driver"]
+        && existsAfter(memberPath(data.organizationId, request.auth.uid))
+        && getAfter(memberPath(data.organizationId, request.auth.uid)).data.status == "active"
+        && getAfter(memberPath(data.organizationId, request.auth.uid)).data.role == data.role;
     }
 
     match /driver_invitations/{inviteCode} {
-      allow get: if signedIn();
+      // Invitation codes are unguessable, single-use capabilities. Claimed invitations
+      // are visible only to their owning manager and the account that claimed them.
+      allow get: if signedIn()
+        && (resource.data.active == true
+          || resource.data.uid == request.auth.uid
+          || isManager(resource.data.organizationId));
       allow list: if false;
-      allow create: if signedIn() && isManager(request.resource.data.organizationId);
+      allow create: if signedIn()
+        && isManager(request.resource.data.organizationId)
+        && request.resource.data.active == true
+        && request.resource.data.uid == "";
       allow delete: if signedIn() && isManager(resource.data.organizationId);
       allow update: if signedIn() && (
         isManager(resource.data.organizationId)
@@ -38,33 +75,42 @@ service cloud.firestore {
           && resource.data.uid == ""
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.active == false
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["uid", "claimedAt", "active"])
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["uid", "claimedAt", "active"])
         )
       );
     }
 
     match /users/{uid} {
-      allow get, create, update: if signedIn() && request.auth.uid == uid;
+      allow get: if signedIn() && request.auth.uid == uid;
       allow list, delete: if false;
+      allow create, update: if request.auth.uid == uid
+        && matchingActiveMembership(request.resource.data)
+        && request.resource.data.keys().hasOnly([
+          "uid", "organizationId", "role", "businessName",
+          "displayName", "phone", "updatedAt"
+        ]);
     }
 
     match /business_codes/{code} {
       allow get: if signedIn();
       allow list: if false;
       allow create: if signedIn()
-        && getAfter(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)).data.ownerUid == request.auth.uid;
+        && getAfter(/databases/$(database)/documents/organizations/$(request.resource.data.organizationId)).data.ownerUid == request.auth.uid
+        && request.resource.data.active == true;
       allow update, delete: if isManager(resource.data.organizationId);
     }
 
     match /organizations/{orgId} {
-      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
       allow get: if isMember(orgId);
-      allow list: if false;
+      allow list, delete: if false;
       allow update: if isManager(orgId);
-      allow delete: if false;
 
       match /members/{uid} {
-        allow get: if isMember(orgId) && (isManager(orgId) || request.auth.uid == uid);
+        allow get: if isMember(orgId)
+          && (isManager(orgId) || request.auth.uid == uid);
         allow list: if isManager(orgId);
         allow create: if signedIn() && request.auth.uid == uid && (
           (
@@ -87,7 +133,9 @@ service cloud.firestore {
 
       match /manager_secrets/{uid} {
         allow read: if signedIn() && request.auth.uid == uid && isManager(orgId);
-        allow create, update: if signedIn() && request.auth.uid == uid && isManagerAfter(orgId);
+        allow create, update: if signedIn()
+          && request.auth.uid == uid
+          && isManagerAfter(orgId);
         allow delete: if isManager(orgId);
       }
 
@@ -98,32 +146,52 @@ service cloud.firestore {
       }
 
       match /trucks/{truckId} {
-        allow read: if isManager(orgId) || (isDriver(orgId) && resource.data.id == assignedTruckId(orgId));
+        allow read: if isManager(orgId)
+          || (isDriver(orgId) && resource.data.id == assignedTruckId(orgId));
         allow create, delete: if isManager(orgId);
         allow update: if isManager(orgId) || (
           isDriver(orgId)
           && resource.data.id == assignedTruckId(orgId)
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(["currentLat", "currentLng", "currentSpeedKmh", "isShiftActive", "statusText", "lastUpdated", "driverName"])
+            .hasOnly([
+              "currentLat", "currentLng", "currentSpeedKmh",
+              "isShiftActive", "statusText", "lastUpdated", "driverName"
+            ])
         );
       }
 
       match /drivers/{driverId} {
-        allow read: if isManager(orgId) || (isMember(orgId) && resource.data.uid == request.auth.uid);
+        allow read: if isManager(orgId)
+          || (isMember(orgId) && resource.data.uid == request.auth.uid);
         allow create: if isManager(orgId);
         allow update: if isManager(orgId) || (
           signedIn()
           && resource.data.uid == ""
           && request.resource.data.uid == request.auth.uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["uid", "status", "name", "phone", "assignedTruckId"])
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["uid", "status", "name", "phone", "assignedTruckId"])
+          && getAfter(/databases/$(database)/documents/driver_invitations/$(resource.data.invitationCode)).data.uid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/driver_invitations/$(resource.data.invitationCode)).data.active == false
         );
         allow delete: if isManager(orgId);
       }
 
-
-
       match /truck_subscriptions/{truckId} {
-        allow read, write: if isManager(orgId);
+        allow read: if isManager(orgId);
+        // Client-side checkout is explicitly test-only. A real paid/active state must
+        // be written by a trusted payment webhook/backend, never by the Android app.
+        allow create, update: if isManager(orgId)
+          && request.resource.data.mode in ["test", "legacy_import"]
+          && (
+            (request.resource.data.mode == "test"
+              && request.resource.data.status == "test_active"
+              && request.resource.data.amountPaise == 9900
+              && request.resource.data.currency == "INR")
+            || (request.resource.data.mode == "legacy_import"
+              && request.resource.data.status == "legacy_active"
+              && request.resource.data.amountPaise == 0)
+          );
+        allow delete: if isManager(orgId);
       }
 
       match /location_points/{pointId} {
@@ -157,10 +225,6 @@ service cloud.firestore {
       }
     }
 
-    // TEMPORARY TEST MODE: any signed-in Firebase user can read/write all Firestore documents.
-    // Replace with tenant-scoped rules before production use.
-    match /{document=**} {
-      allow read, write: if request.auth != null;
-    }
+    // No catch-all allow rule: every unlisted collection and subcollection is denied.
   }
 }
