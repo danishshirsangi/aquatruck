@@ -335,6 +335,7 @@ object TenantManager {
             "uid" to user.uid,
             "name" to driverDisplayName,
             "phone" to phone.trim(),
+            "assignedTruckId" to 0,
             "status" to "active"
         ))
         batch.set(orgRef.collection("members").document(user.uid), mapOf(
