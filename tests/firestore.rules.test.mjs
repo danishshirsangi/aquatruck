@@ -36,6 +36,7 @@ async function registerDriverAndInvite(managerDb) {
   const batch = writeBatch(managerDb);
   const org = doc(managerDb, "organizations", ORG_ID);
   batch.set(doc(org, "trucks", "truck_1"), { id: TRUCK_ID, truckNumber: TRUCK_ID, activeDriverUid: "", isShiftActive: false, statusText: "Off Duty" });
+  batch.set(doc(org, "trucks", "truck_2"), { id: 2, truckNumber: 2, activeDriverUid: "", isShiftActive: false, statusText: "Off Duty" });
   batch.set(doc(org, "drivers", "driver_1"), { id: DRIVER_ID, name: "Test Driver", phone: "9999999999", assignedTruckId: 0, uid: "", status: "pending", invitationCode: INVITE_CODE });
   batch.set(doc(managerDb, "driver_invitations", INVITE_CODE), { organizationId: ORG_ID, businessName: "Test Water Company", driverId: DRIVER_ID, driverName: "Test Driver", phoneHash: "test-phone-hash", active: true, uid: "" });
   await assertSucceeds(batch.commit());
@@ -99,6 +100,12 @@ test("driver invitation claim atomically creates membership without assigning a 
   assert.equal(member.data().assignedTruckId, undefined);
   assert.equal(user.data().organizationId, ORG_ID);
   assert.equal(user.data().role, "driver");
+});
+
+test("driver can see all trucks in their own business before choosing one", async () => {
+  const { driverDb } = await createCompleteBusinessAndDriver();
+  const trucks = await assertSucceeds(getDocs(collection(driverDb, "organizations", ORG_ID, "trucks")));
+  assert.equal(trucks.size, 2);
 });
 
 test("active driver uploads GPS points and manager reads route history", async () => {
