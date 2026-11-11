@@ -337,6 +337,56 @@ object TenantManager {
         return businessName
     }
 
+    // Firestore transactions serialize competing claims of the same truck. A driver
+    // must be online to start, switch, or end a shift.
+    suspend fun changeActiveTruck(context: Context, expectedOldId: Int?, targetId: Int?) {
+        require(role(context) == "driver") { "Only drivers can claim trucks." }
+        val orgId = organizationId(context) ?: error("Business session missing.")
+        val uid = currentUserUid() ?: error("Sign in to continue.")
+        val db = firestore(context)
+        val root = db.collection("organizations").document(orgId)
+        val memberRef = root.collection("members").document(uid)
+        val oldRef = expectedOldId?.let { root.collection("trucks").document("truck_$it") }
+        val targetRef = targetId?.let { root.collection("trucks").document("truck_$it") }
+        require(expectedOldId != targetId) { "Select a different truck." }
+        db.runTransaction { tx ->
+            val member = tx.get(memberRef)
+            check(member.getString("role") == "driver" && member.getString("status") == "active") {
+                "Driver membership is not active."
+            }
+            val active = member.getLong("activeTruckId")?.toInt()
+            check(active == expectedOldId) { "Your truck assignment changed. Refresh and retry." }
+            val old = oldRef?.let { tx.get(it) }
+            val target = targetRef?.let { tx.get(it) }
+            if (old != null) {
+                check(old.exists() && old.getString("activeDriverUid") == uid) {
+                    "You no longer own the previous truck."
+                }
+            }
+            if (target != null) {
+                check(target.exists() && target.getLong("id")?.toInt() == targetId) {
+                    "Truck not found."
+                }
+                check(target.getString("activeDriverUid").isNullOrBlank() &&
+                    target.getBoolean("isShiftActive") != true) {
+                    "This truck is already in use."
+                }
+            }
+            val now = System.currentTimeMillis()
+            if (oldRef != null) tx.update(oldRef, mapOf(
+                "activeDriverUid" to "", "isShiftActive" to false,
+                "statusText" to "Off Duty", "currentSpeedKmh" to 0.0,
+                "lastUpdated" to now
+            ))
+            if (targetRef != null) tx.update(targetRef, mapOf(
+                "activeDriverUid" to uid, "isShiftActive" to true,
+                "statusText" to "Shift Active - En Route", "lastUpdated" to now
+            ))
+            tx.update(memberRef, "activeTruckId", targetId ?: 0)
+            null
+        }.await()
+    }
+
     suspend fun refreshFleetCache(context: Context) {
         val orgId = organizationId(context) ?: return
         val uid = Firebase.auth.currentUser?.uid ?: return
