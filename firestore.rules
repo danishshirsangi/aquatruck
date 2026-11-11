@@ -40,7 +40,8 @@ service cloud.firestore {
     }
 
     function activeTruckPath(orgId, truckId) {
-      return /databases/$(database)/documents/organizations/$(orgId)/trucks/truck_$(truckId);
+      let truckDocId = "truck_" + string(truckId);
+      return /databases/$(database)/documents/organizations/$(orgId)/trucks/$(truckDocId);
     }
 
     function isActiveDriverForTruck(orgId, truckId) {
