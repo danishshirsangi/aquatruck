@@ -405,76 +405,41 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Driver Shift Actions
-    fun startDriverShift(truckId: Int, driverName: String, selfieUri: String?, context: Context) {
+    fun startDriverShift(truckId: Int, driverName: String, selfieUri: String?, context: Context, onResult: (Boolean, String?) -> Unit = { _, _ -> }) {
         viewModelScope.launch(Dispatchers.IO) {
-            val truck = dao.getTruckByIdDirect(truckId) ?: return@launch
-            if (truck.isShiftActive && _loggedInTruckId.value != truckId) return@launch
-            if (TenantManager.role(context) == "driver") {
-                try {
+            var truckClaimed = false
+            try {
+                val truck = dao.getTruckByIdDirect(truckId) ?: throw IllegalStateException("This truck is no longer available. Refresh the fleet and try again.")
+                if (truck.isShiftActive && _loggedInTruckId.value != truckId) throw IllegalStateException("This truck is already in use. Please select another available truck.")
+                if (TenantManager.role(context) == "driver") {
                     TenantManager.changeActiveTruck(context, _loggedInTruckId.value, truckId)
-                } catch (e: Exception) {
-                    android.util.Log.w("FleetViewModel", "Unable to claim truck for shift: " + e.message, e)
-                    return@launch
+                    truckClaimed = true
                 }
+                val now = System.currentTimeMillis()
+                val loc = com.example.util.LocationUtils.getCurrentLocation(context)
+                val lat = loc?.latitude ?: truck.currentLat
+                val lng = loc?.longitude ?: truck.currentLng
+                val attendance = AttendanceRecord(truckId = truckId, driverName = driverName, selfieUri = selfieUri, checkInTime = now, checkInLat = lat, checkInLng = lng, isCompleted = false)
+                val attId = dao.insertAttendance(attendance)
+                firestoreSync.syncAttendance(attendance.copy(id = attId))
+                val updatedTruck = truck.copy(isShiftActive = true, driverName = driverName, currentLat = lat, currentLng = lng, statusText = "Shift Active - En Route", lastUpdated = now)
+                dao.updateTruck(updatedTruck)
+                firestoreSync.syncTruck(updatedTruck)
+                if (lat != 0.0 || lng != 0.0) {
+                    dao.insertLocationPoint(LocationPoint(truckId = truckId, latitude = lat, longitude = lng, speedKmh = 0f, accuracyMeters = loc?.accuracy ?: 3f, timestamp = now))
+                    LocationSyncScheduler.enqueue(context)
+                }
+                _loggedInTruckId.value = truckId
+                _selectedTruckId.value = truckId
+                _loggedInDriverName.value = driverName
+                sessionPrefs.edit().putInt("session_truck_id", truckId).putString("session_driver_name", driverName).putLong("session_start_time", now).apply()
+                LocationTrackingService.startService(context, truckId, truck.name)
+                withContext(Dispatchers.Main) { onResult(true, null) }
+            } catch (e: Exception) {
+                android.util.Log.e("FleetViewModel", "Unable to start driver shift", e)
+                if (truckClaimed) runCatching { TenantManager.changeActiveTruck(context, truckId, null) }
+                withContext(Dispatchers.Main) { onResult(false, e.message ?: "Unable to start your shift. Please check your connection and try again.") }
             }
-            val now = System.currentTimeMillis()
-
-            // 1. Lock driver session to this truck & driver identity and persist to SharedPreferences
-            _loggedInTruckId.value = truckId
-            _selectedTruckId.value = truckId
-            _loggedInDriverName.value = driverName
-
-            sessionPrefs.edit()
-                .putInt("session_truck_id", truckId)
-                .putString("session_driver_name", driverName)
-                .putLong("session_start_time", now)
-                .apply()
-
-            // 2. Fetch current real GPS location for check-in
-            val loc = com.example.util.LocationUtils.getCurrentLocation(context)
-            val checkInLat = loc?.latitude ?: truck.currentLat
-            val checkInLng = loc?.longitude ?: truck.currentLng
-
-            // 3. Create active attendance record
-            val attendance = AttendanceRecord(
-                truckId = truckId,
-                driverName = driverName,
-                selfieUri = selfieUri,
-                checkInTime = now,
-                checkInLat = checkInLat,
-                checkInLng = checkInLng,
-                isCompleted = false
-            )
-            val attId = dao.insertAttendance(attendance)
-            firestoreSync.syncAttendance(attendance.copy(id = attId))
-
-            // 4. Mark truck shift active with real coordinates
-            val updatedTruck = truck.copy(
-                isShiftActive = true,
-                driverName = driverName,
-                currentLat = checkInLat,
-                currentLng = checkInLng,
-                statusText = "Shift Active - En Route",
-                lastUpdated = now
-            )
-            dao.updateTruck(updatedTruck)
-            firestoreSync.syncTruck(updatedTruck)
-
-            if (checkInLat != 0.0 || checkInLng != 0.0) {
-                val pt = LocationPoint(
-                    truckId = truckId,
-                    latitude = checkInLat,
-                    longitude = checkInLng,
-                    speedKmh = 0f,
-                    accuracyMeters = loc?.accuracy ?: 3f,
-                    timestamp = now
-                )
-                dao.insertLocationPoint(pt)
-                LocationSyncScheduler.enqueue(context)
-            }
-
-            // 5. Start adaptive foreground GPS tracking
-            LocationTrackingService.startService(context, truckId, truck.name)
         }
     }
 
