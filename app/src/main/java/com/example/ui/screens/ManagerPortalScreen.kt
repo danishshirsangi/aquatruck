@@ -52,6 +52,7 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -73,6 +74,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
 import com.example.data.model.AttendanceRecord
 import com.example.data.model.DriverEntity
 import com.example.data.model.StopRecord
@@ -101,6 +103,15 @@ fun ManagerPortalScreen(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+
+    // Keep the manager's map and route history in sync with the driver's Firestore uploads.
+    LaunchedEffect(viewModel) {
+        while (true) {
+            runCatching { com.example.data.tenant.TenantManager.refreshManagerLiveTracking(context) }
+                .onFailure { android.util.Log.w("ManagerPortal", "Live tracking refresh failed: ${it.message}", it) }
+            delay(15_000L)
+        }
+    }
     val trucks by viewModel.allTrucks.collectAsState()
     val truckAddError by viewModel.truckAddError.collectAsState()
     val drivers by viewModel.allDrivers.collectAsState()
