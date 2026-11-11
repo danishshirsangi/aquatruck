@@ -193,7 +193,7 @@ service cloud.firestore {
           && (
             (request.resource.data.mode == "test"
               && request.resource.data.status == "test_active"
-              && request.resource.data.amountPaise == 9900
+              && request.resource.data.amountPaise == 14900
               && request.resource.data.currency == "INR")
             || (request.resource.data.mode == "legacy_import"
               && request.resource.data.status == "legacy_active"
