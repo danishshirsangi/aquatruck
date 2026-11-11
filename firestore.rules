@@ -106,7 +106,11 @@ service cloud.firestore {
         && request.resource.data.ownerUid == request.auth.uid;
       allow get: if isMember(orgId);
       allow list, delete: if false;
-      allow update: if isManager(orgId);
+      allow update: if isManager(orgId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "businessName", "businessType", "ownerName", "contactPhone",
+          "contactEmail", "address", "city", "state", "gstin", "status"
+        ]);
 
       match /members/{uid} {
         allow get: if isMember(orgId)
@@ -128,7 +132,11 @@ service cloud.firestore {
             && getAfter(/databases/$(database)/documents/driver_invitations/$(request.resource.data.invitationId)).data.assignedTruckId == request.resource.data.assignedTruckId
           )
         );
-        allow update, delete: if isManager(orgId);
+        allow update: if isManager(orgId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "assignedTruckId", "earlyLogoutEnabled", "name", "phone"
+          ]);
+        allow delete: if isManager(orgId);
       }
 
       match /manager_secrets/{uid} {
