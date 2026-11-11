@@ -120,8 +120,9 @@ service cloud.firestore {
         ]);
 
       match /members/{uid} {
-        allow get: if isMember(orgId)
-          && (isManager(orgId) || request.auth.uid == uid);
+        allow get: if signedIn() && (
+          request.auth.uid == uid || isManager(orgId)
+        );
         allow list: if isManager(orgId);
         allow create: if signedIn() && request.auth.uid == uid && (
           (
