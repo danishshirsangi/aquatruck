@@ -35,9 +35,9 @@ async function registerManagerBusiness() {
 async function registerDriverAndInvite(managerDb) {
   const batch = writeBatch(managerDb);
   const org = doc(managerDb, "organizations", ORG_ID);
-  batch.set(doc(org, "trucks", "truck_1"), { id: TRUCK_ID, truckNumber: TRUCK_ID, isShiftActive: false, statusText: "Off Duty" });
-  batch.set(doc(org, "drivers", "driver_1"), { id: DRIVER_ID, name: "Test Driver", phone: "9999999999", assignedTruckId: TRUCK_ID, uid: "", status: "pending", invitationCode: INVITE_CODE });
-  batch.set(doc(managerDb, "driver_invitations", INVITE_CODE), { organizationId: ORG_ID, businessName: "Test Water Company", driverId: DRIVER_ID, driverName: "Test Driver", phoneHash: "test-phone-hash", assignedTruckId: TRUCK_ID, active: true, uid: "" });
+  batch.set(doc(org, "trucks", "truck_1"), { id: TRUCK_ID, truckNumber: TRUCK_ID, activeDriverUid: "", isShiftActive: false, statusText: "Off Duty" });
+  batch.set(doc(org, "drivers", "driver_1"), { id: DRIVER_ID, name: "Test Driver", phone: "9999999999", assignedTruckId: 0, uid: "", status: "pending", invitationCode: INVITE_CODE });
+  batch.set(doc(managerDb, "driver_invitations", INVITE_CODE), { organizationId: ORG_ID, businessName: "Test Water Company", driverId: DRIVER_ID, driverName: "Test Driver", phoneHash: "test-phone-hash", active: true, uid: "" });
   await assertSucceeds(batch.commit());
 }
 
@@ -48,17 +48,27 @@ async function claimDriverInvitation() {
   const invite = doc(db, "driver_invitations", INVITE_CODE);
   const org = doc(db, "organizations", ORG_ID);
   batch.update(invite, { uid: DRIVER_UID, claimedAt: Date.now(), active: false });
-  batch.update(doc(org, "drivers", "driver_1"), { uid: DRIVER_UID, name: "Test Driver", phone: "9999999999", assignedTruckId: TRUCK_ID, status: "active" });
-  batch.set(doc(org, "members", DRIVER_UID), { uid: DRIVER_UID, driverId: DRIVER_ID, role: "driver", name: "Test Driver", phone: "9999999999", assignedTruckId: TRUCK_ID, earlyLogoutEnabled: false, status: "active", createdAt: Date.now(), invitationId: INVITE_CODE });
+  batch.update(doc(org, "drivers", "driver_1"), { uid: DRIVER_UID, name: "Test Driver", phone: "9999999999", status: "active" });
+  batch.set(doc(org, "members", DRIVER_UID), { uid: DRIVER_UID, driverId: DRIVER_ID, role: "driver", name: "Test Driver", phone: "9999999999", activeTruckId: 0, earlyLogoutEnabled: false, status: "active", createdAt: Date.now(), invitationId: INVITE_CODE });
   batch.set(doc(db, "users", DRIVER_UID), { uid: DRIVER_UID, organizationId: ORG_ID, role: "driver", businessName: "Test Water Company", displayName: "Test Driver", phone: "9999999999", updatedAt: Date.now() });
   await assertSucceeds(batch.commit());
   return { driverContext, db };
+}
+
+async function claimTruckForDriver(driverDb) {
+  const batch = writeBatch(driverDb);
+  batch.update(doc(driverDb, "organizations", ORG_ID, "members", DRIVER_UID), { activeTruckId: TRUCK_ID });
+  batch.update(doc(driverDb, "organizations", ORG_ID, "trucks", "truck_1"), {
+    activeDriverUid: DRIVER_UID, isShiftActive: true, statusText: "Shift Active - En Route"
+  });
+  await assertSucceeds(batch.commit());
 }
 
 async function createCompleteBusinessAndDriver() {
   const { managerContext, db: managerDb } = await registerManagerBusiness();
   await registerDriverAndInvite(managerDb);
   const { driverContext, db: driverDb } = await claimDriverInvitation();
+  await claimTruckForDriver(driverDb);
   return { managerContext, managerDb, driverContext, driverDb };
 }
 
@@ -79,12 +89,14 @@ test("manager creates business and driver invitation", async () => {
   assert.equal(orgSnap.data().businessName, "Test Water Company");
 });
 
-test("driver invitation claim atomically creates membership and user profile", async () => {
+test("driver invitation claim atomically creates membership without assigning a truck", async () => {
   const { driverDb } = await createCompleteBusinessAndDriver();
   const member = await assertSucceeds(getDoc(doc(driverDb, "organizations", ORG_ID, "members", DRIVER_UID)));
   const user = await assertSucceeds(getDoc(doc(driverDb, "users", DRIVER_UID)));
   assert.equal(member.data().role, "driver");
   assert.equal(member.data().status, "active");
+  assert.equal(member.data().activeTruckId, 0);
+  assert.equal(member.data().assignedTruckId, undefined);
   assert.equal(user.data().organizationId, ORG_ID);
   assert.equal(user.data().role, "driver");
 });
