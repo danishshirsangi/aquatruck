@@ -567,13 +567,6 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
 
     fun endDriverShift(truckId: Int, context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
-            if (TenantManager.role(context) == "driver") {
-                try {
-                    TenantManager.changeActiveTruck(context, expectedOldId = truckId, targetId = null)
-                } catch (e: Exception) {
-                    return@launch
-                }
-            }
             val now = System.currentTimeMillis()
 
             // 1. Complete active attendance record
@@ -597,7 +590,7 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                     lastUpdated = now
                 )
                 dao.updateTruck(offDutyTruck)
-                firestoreSync.syncTruck(offDutyTruck)
+                if (TenantManager.role(context) != "driver") firestoreSync.syncTruck(offDutyTruck)
             }
 
             // 3. Unlock driver session & clear persisted session so driver can choose truck/identity on next shift
