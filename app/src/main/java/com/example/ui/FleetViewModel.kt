@@ -229,11 +229,17 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             allTrucks.collect { list ->
                 val currentLoggedIn = _loggedInTruckId.value
                 if (currentLoggedIn != null) {
-                    val truck = list.firstOrNull { it.id == currentLoggedIn }
-                    if (truck == null || !truck.isShiftActive) {
-                        _loggedInTruckId.value = null
-                        _loggedInDriverName.value = null
-                        sessionPrefs.edit().clear().apply()
+                    // Room emits its initial snapshot immediately, which may be empty
+                    // while the tenant fleet is still being restored from Firestore.
+                    // Do not discard a valid persisted driver session during that
+                    // temporary loading window. Once trucks are available, validate it.
+                    if (list.isNotEmpty()) {
+                        val truck = list.firstOrNull { it.id == currentLoggedIn }
+                        if (truck == null || !truck.isShiftActive) {
+                            _loggedInTruckId.value = null
+                            _loggedInDriverName.value = null
+                            sessionPrefs.edit().clear().apply()
+                        }
                     }
                 } else if (TenantManager.role(getApplication()) == "driver") {
                     // A truck can be active on another driver's device. Do not infer that
