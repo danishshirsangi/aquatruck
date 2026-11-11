@@ -74,7 +74,16 @@ async function createCompleteBusinessAndDriver() {
 }
 
 function gpsPoint(id, truckId = TRUCK_ID) {
-  return { id, truckId, latitude: 15.852 + id * 0.0001, longitude: 74.510 + id * 0.0001, speedKmh: 18.5, accuracyMeters: 7.5, timestamp: 1794400000000 + id * 10000 };
+  return {
+    id,
+    truckId,
+    driverUid: DRIVER_UID,
+    latitude: 15.852 + id * 0.0001,
+    longitude: 74.510 + id * 0.0001,
+    speedKmh: 18.5,
+    accuracyMeters: 7.5,
+    timestamp: 1794400000000 + id * 10000
+  };
 }
 
 before(async () => {
