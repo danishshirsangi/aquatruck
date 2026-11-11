@@ -101,7 +101,7 @@ fun ManagerPinDialog(
                 )
 
                 Text(
-                    text = "Enter 6-digit security PIN to access live tracking, trip logs, and attendance audits.",
+                    text = "Enter your 4–8 digit security PIN to access live tracking, trip logs, and attendance audits.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -113,13 +113,13 @@ fun ManagerPinDialog(
                 OutlinedTextField(
                     value = pinText,
                     onValueChange = {
-                        if (it.length <= 6 && it.all { char -> char.isDigit() }) {
+                        if (it.length <= 8 && it.all { char -> char.isDigit() }) {
                             pinText = it
                             isError = false
                         }
                     },
                     label = { Text("Security PIN") },
-                    placeholder = { Text("• • • • • •") },
+                    placeholder = { Text("• • • • • • • •") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
