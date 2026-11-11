@@ -35,6 +35,10 @@ class LocationSyncWorker(
                 val pendingLocations = dao.getPendingLocationPoints()
                 if (pendingLocations.isNotEmpty()) {
                     val ids = pendingLocations.map { it.id }
+                    Log.i(
+                        "LocationSyncWorker",
+                        "Uploading ${pendingLocations.size} GPS points for trucks=${pendingLocations.map { it.truckId }.distinct()}"
+                    )
                     if (!syncManager.syncLocationBatch(pendingLocations)) {
                         Log.e(
                             "LocationSyncWorker",
