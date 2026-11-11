@@ -133,7 +133,7 @@ fun ManagerPortalScreen(
     var pendingTruckDriver by remember { mutableStateOf("") }
     var pendingTruckCapacity by remember { mutableIntStateOf(10000) }
 
-    val tabs = listOf("Fleet Overview", "Interactive Map", "Voice Deliveries", "Stop Logs", "Attendance", "Shift Settings", "Drivers & Assignments")
+    val tabs = listOf("Fleet Overview", "Interactive Map", "Voice Deliveries", "Stop Logs", "Attendance", "Shift Settings", "Drivers")
 
     Column(
         modifier = modifier
