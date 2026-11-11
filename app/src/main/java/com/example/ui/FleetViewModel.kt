@@ -51,6 +51,10 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
     private val _voiceUploadStatus = MutableStateFlow("Idle")
     val voiceUploadStatus: StateFlow<String> = _voiceUploadStatus.asStateFlow()
 
+    private val _truckAddError = MutableStateFlow<String?>(null)
+    val truckAddError: StateFlow<String?> = _truckAddError.asStateFlow()
+    fun clearTruckAddError() { _truckAddError.value = null }
+
     val allTrucks: StateFlow<List<TruckEntity>> = dao.getAllTrucks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -329,26 +333,35 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
 
     // Manager Actions: Add Truck & Add Driver
     fun addTruck(name: String, plateNumber: String, driverName: String, capacityLiters: Int) {
+        _truckAddError.value = null
         viewModelScope.launch(Dispatchers.IO) {
-            val trucks = allTrucks.value
-            val nextId = if (trucks.isEmpty()) 1 else (trucks.maxOf { it.id } + 1)
-            val newTruck = TruckEntity(
-                id = nextId,
-                name = name,
-                plateNumber = plateNumber,
-                driverName = driverName,
-                capacityLiters = capacityLiters,
-                currentLat = 0.0,
-                currentLng = 0.0,
-                isShiftActive = false,
-                statusText = "Off Duty"
-            )
-            val subscriptionSaved = firestoreSync.recordTestTruckSubscription(nextId)
-            if (!subscriptionSaved) return@launch
-            dao.insertTruck(newTruck)
-            firestoreSync.syncTruck(newTruck)
-            if (_selectedTruckId.value == null) {
-                _selectedTruckId.value = nextId
+            try {
+                // Use the latest local fleet snapshot, then persist remotely before
+                // exposing the truck locally so a failed Firestore write is visible.
+                val trucks = dao.getAllTrucksSnapshot()
+                val nextId = (trucks.maxOfOrNull { it.id } ?: 0) + 1
+                val newTruck = TruckEntity(
+                    id = nextId,
+                    name = name,
+                    plateNumber = plateNumber,
+                    driverName = driverName,
+                    capacityLiters = capacityLiters,
+                    currentLat = 0.0,
+                    currentLng = 0.0,
+                    isShiftActive = false,
+                    statusText = "Off Duty"
+                )
+                check(firestoreSync.recordTestTruckSubscription(nextId)) {
+                    "Could not save the ₹149 test subscription. Check your internet connection and manager access, then try again."
+                }
+                check(firestoreSync.syncTruck(newTruck)) {
+                    "Subscription was saved, but the truck could not be added to the business fleet. Please retry."
+                }
+                dao.insertTruck(newTruck)
+                if (_selectedTruckId.value == null) _selectedTruckId.value = nextId
+                runCatching { TenantManager.refreshFleetCache(getApplication()) }
+            } catch (e: Exception) {
+                _truckAddError.value = e.message ?: "Unable to add truck. Please try again."
             }
         }
     }
