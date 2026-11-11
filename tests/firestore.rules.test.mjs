@@ -153,8 +153,14 @@ test("driver cannot access another organisation's GPS history", async () => {
   await assertFails(getDoc(doc(driverDb, "organizations", "another-company", "location_points", "foreign-point")));
 });
 
-test("offline queue uploads after network returns", async () => {
+test("offline queue uploads after network returns while the driver still owns the truck", async () => {
   const { managerDb, driverDb } = await createCompleteBusinessAndDriver();
+  const claim = writeBatch(driverDb);
+  claim.update(doc(driverDb, "organizations", ORG_ID, "trucks", "truck_1"), {
+    activeDriverUid: DRIVER_UID, isShiftActive: true, statusText: "Shift Active - En Route"
+  });
+  claim.update(doc(driverDb, "organizations", ORG_ID, "members", DRIVER_UID), { activeTruckId: TRUCK_ID });
+  await assertSucceeds(claim.commit());
   const localQueue = Array.from({ length: 5 }, (_, i) => gpsPoint(200 + i));
   let networkAvailable = false;
   assert.equal(networkAvailable, false);
