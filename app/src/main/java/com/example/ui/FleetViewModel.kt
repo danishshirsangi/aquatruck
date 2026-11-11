@@ -421,10 +421,20 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 val lng = loc?.longitude ?: truck.currentLng
                 val attendance = AttendanceRecord(truckId = truckId, driverName = driverName, selfieUri = selfieUri, checkInTime = now, checkInLat = lat, checkInLng = lng, isCompleted = false)
                 val attId = dao.insertAttendance(attendance)
-                firestoreSync.syncAttendance(attendance.copy(id = attId))
+                // The driver's truck claim transaction already activates the remote truck
+                // and membership together. Syncing the full truck entity here would attempt
+                // to rewrite protected ownership fields under the hardened Firestore rules.
+                // Attendance is written only after that claim, so ownsTruck() can authorize it.
+                check(firestoreSync.syncAttendance(attendance.copy(id = attId))) {
+                    "Could not save your shift attendance. Please try again."
+                }
                 val updatedTruck = truck.copy(isShiftActive = true, driverName = driverName, currentLat = lat, currentLng = lng, statusText = "Shift Active - En Route", lastUpdated = now)
                 dao.updateTruck(updatedTruck)
-                firestoreSync.syncTruck(updatedTruck)
+                if (TenantManager.role(context) != "driver") {
+                    check(firestoreSync.syncTruck(updatedTruck)) {
+                        "Your truck status could not be saved. Please try again."
+                    }
+                }
                 if (lat != 0.0 || lng != 0.0) {
                     dao.insertLocationPoint(LocationPoint(truckId = truckId, latitude = lat, longitude = lng, speedKmh = 0f, accuracyMeters = loc?.accuracy ?: 3f, timestamp = now))
                     LocationSyncScheduler.enqueue(context)
