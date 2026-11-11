@@ -175,6 +175,49 @@ test("driver can transactionally claim an inactive legacy truck with a null acti
   assert.equal(member.data().activeTruckId, 2);
 });
 
+test("driver can switch to a selected available truck when local session is empty but Firestore has an active truck", async () => {
+  const { driverDb } = await createCompleteBusinessAndDriver();
+  const memberRef = doc(driverDb, "organizations", ORG_ID, "members", DRIVER_UID);
+  const oldTruckRef = doc(driverDb, "organizations", ORG_ID, "trucks", "truck_1");
+  const selectedTruckRef = doc(driverDb, "organizations", ORG_ID, "trucks", "truck_2");
+
+  await claimTruckForDriver(driverDb);
+
+  // Simulate a fresh local session: the app passes expectedOldId=null,
+  // while Firestore still records truck 1 as this driver's active truck.
+  await runTransaction(driverDb, async (transaction) => {
+    const member = await transaction.get(memberRef);
+    const oldTruck = await transaction.get(oldTruckRef);
+    const selectedTruck = await transaction.get(selectedTruckRef);
+    assert.equal(member.data().activeTruckId, TRUCK_ID);
+    assert.equal(oldTruck.data().activeDriverUid, DRIVER_UID);
+    assert.equal(selectedTruck.data().isShiftActive, false);
+
+    transaction.update(oldTruckRef, {
+      activeDriverUid: "",
+      lastDriverUid: DRIVER_UID,
+      isShiftActive: false,
+      statusText: "Off Duty",
+      currentSpeedKmh: 0,
+      lastUpdated: Date.now()
+    });
+    transaction.update(selectedTruckRef, {
+      activeDriverUid: DRIVER_UID,
+      isShiftActive: true,
+      statusText: "Shift Active - En Route",
+      lastUpdated: Date.now()
+    });
+    transaction.update(memberRef, { activeTruckId: 2 });
+  });
+
+  const member = await assertSucceeds(getDoc(memberRef));
+  const oldTruck = await assertSucceeds(getDoc(oldTruckRef));
+  const selectedTruck = await assertSucceeds(getDoc(selectedTruckRef));
+  assert.equal(member.data().activeTruckId, 2);
+  assert.equal(oldTruck.data().isShiftActive, false);
+  assert.equal(selectedTruck.data().activeDriverUid, DRIVER_UID);
+});
+
 test("driver cannot upload GPS for a truck they have not claimed", async () => {
   const { driverDb } = await createCompleteBusinessAndDriver();
   await claimTruckForDriver(driverDb);

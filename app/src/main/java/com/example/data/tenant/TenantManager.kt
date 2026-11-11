@@ -375,48 +375,72 @@ object TenantManager {
         val db = firestore(context)
         val root = db.collection("organizations").document(orgId)
         val memberRef = root.collection("members").document(uid)
-        val oldRef = expectedOldId?.let { root.collection("trucks").document("truck_$it") }
         val targetRef = targetId?.let { root.collection("trucks").document("truck_$it") }
-        require(expectedOldId != targetId) { "Select a different truck." }
+
         db.runTransaction { tx ->
             val member = tx.get(memberRef)
-            check(member.getString("role") == "driver" && member.getString("status") == "active") {
+            check(member.exists() && member.getString("role") == "driver" && member.getString("status") == "active") {
                 "Driver membership is not active."
             }
-            val active = member.getLong("activeTruckId")?.toInt()?.takeIf { it > 0 }
-            val legacyActive = active == null && expectedOldId != null &&
-                member.getLong("assignedTruckId")?.toInt() == expectedOldId
-            check(active == expectedOldId || legacyActive) {
-                "Your truck assignment changed. Refresh and retry."
-            }
+
+            // Firestore is authoritative. The local session can be empty after a
+            // reinstall, process death, or a failed previous start attempt.
+            val activeId = member.getLong("activeTruckId")?.toInt()?.takeIf { it > 0 }
+            val assignedId = member.getLong("assignedTruckId")?.toInt()?.takeIf { it > 0 }
+            val oldId = activeId ?: expectedOldId?.takeIf { it == assignedId }
+            val oldRef = oldId?.let { root.collection("trucks").document("truck_$it") }
             val old = oldRef?.let { tx.get(it) }
             val target = targetRef?.let { tx.get(it) }
+
             if (old != null) {
-                val legacyOwned = legacyActive && old.getString("activeDriverUid").isNullOrBlank() &&
-                    old.getBoolean("isShiftActive") == true
-                check(old.exists() && (old.getString("activeDriverUid") == uid || legacyOwned)) {
-                    "You no longer own the previous truck."
+                val oldOwner = old.getString("activeDriverUid")
+                val legacyOwned = activeId == null && oldId == assignedId &&
+                    oldOwner.isNullOrBlank() && old.getBoolean("isShiftActive") == true
+                check(old.exists() && (oldOwner == uid || legacyOwned)) {
+                    "The previously active truck is not owned by your account. Ask your manager to verify its shift status."
                 }
             }
+
             if (target != null) {
                 check(target.exists() && target.getLong("id")?.toInt() == targetId) {
-                    "Truck not found."
+                    "Truck not found. Refresh the fleet and try again."
                 }
-                check(target.getString("activeDriverUid").isNullOrBlank() &&
-                    target.getBoolean("isShiftActive") != true) {
-                    "This truck is already in use."
+                val targetOwner = target.getString("activeDriverUid")
+                val alreadyOwnedByThisDriver = targetOwner == uid &&
+                    target.getBoolean("isShiftActive") == true
+                check(alreadyOwnedByThisDriver ||
+                    (targetOwner.isNullOrBlank() && target.getBoolean("isShiftActive") != true)) {
+                    "This truck is already in use. Please select another available truck."
                 }
             }
+
+            // Selecting the truck already owned by this driver is an idempotent
+            // start/recovery, not a conflicting reassignment.
+            if (oldId == targetId && oldId != null) {
+                tx.update(memberRef, "activeTruckId", targetId)
+                return@runTransaction
+            }
+
+            // If the selected truck is already claimed by this same UID but the
+            // membership pointer is stale, repair the pointer without releasing it.
+            val targetAlreadyOwned = target != null &&
+                target.getString("activeDriverUid") == uid &&
+                target.getBoolean("isShiftActive") == true
             val now = System.currentTimeMillis()
-            if (oldRef != null) tx.update(oldRef, mapOf(
-                "activeDriverUid" to "", "lastDriverUid" to uid, "isShiftActive" to false,
-                "statusText" to "Off Duty", "currentSpeedKmh" to 0.0,
-                "lastUpdated" to now
-            ))
-            if (targetRef != null) tx.update(targetRef, mapOf(
-                "activeDriverUid" to uid, "isShiftActive" to true,
-                "statusText" to "Shift Active - En Route", "lastUpdated" to now
-            ))
+
+            if (oldRef != null && oldId != targetId) {
+                tx.update(oldRef, mapOf(
+                    "activeDriverUid" to "", "lastDriverUid" to uid, "isShiftActive" to false,
+                    "statusText" to "Off Duty", "currentSpeedKmh" to 0.0,
+                    "lastUpdated" to now
+                ))
+            }
+            if (targetRef != null && !targetAlreadyOwned) {
+                tx.update(targetRef, mapOf(
+                    "activeDriverUid" to uid, "isShiftActive" to true,
+                    "statusText" to "Shift Active - En Route", "lastUpdated" to now
+                ))
+            }
             tx.update(memberRef, "activeTruckId", targetId ?: 0)
             null
         }.await()
