@@ -1,0 +1,39 @@
+name: Firestore Emulator Tests
+
+on:
+  push:
+    branches:
+      - security/harden-multitenant-access
+  pull_request:
+    branches:
+      - security/harden-multitenant-access
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  firestore-rules:
+    name: Firestore security rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up Java for Firestore Emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Firestore Emulator tests
+        run: npm run test:firestore
