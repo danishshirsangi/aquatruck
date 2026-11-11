@@ -38,11 +38,8 @@ import com.example.data.model.TruckEntity
 @Composable
 fun ManagerDriverAssignmentsScreen(
     drivers: List<DriverEntity>,
-    trucks: List<TruckEntity>,
-    onAssignTruck: (Long, Int) -> Unit,
     onEarlyLogoutChanged: (Long, Boolean) -> Unit
 ) {
-    var expandedDriverId by remember { mutableStateOf<Long?>(null) }
     var visibleQrDriverId by remember { mutableStateOf<Long?>(null) }
     val clipboard = LocalClipboardManager.current
 
@@ -51,9 +48,9 @@ fun ManagerDriverAssignmentsScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
-            Text("Driver assignments", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("Drivers", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text(
-                "Register each driver with the phone number they will use to join. Assign a truck and enable early logout individually when requested.",
+                "Drivers choose an available truck when they start a shift. Register drivers with their phone number and share their one-time invitation code.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -92,37 +89,6 @@ fun ManagerDriverAssignmentsScreen(
                             if (visibleQrDriverId == driver.id) DriverInviteQrCode(code)
                         }
                     }
-                    val assignedTruckIsActive = trucks.firstOrNull { it.id == driver.assignedTruckId }?.isShiftActive == true
-                    Button(
-                        onClick = { expandedDriverId = driver.id },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = trucks.isNotEmpty() && !assignedTruckIsActive
-                    ) {
-                        val selectedTruck = trucks.firstOrNull { it.id == driver.assignedTruckId }
-                        Text(if (selectedTruck == null) "Assign a truck" else "Assigned: ${selectedTruck.name} — change")
-                    }
-                    if (assignedTruckIsActive) {
-                        Text(
-                            "Truck assignment is locked while this driver's truck has an active shift. End the shift before changing trucks.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = expandedDriverId == driver.id,
-                        onDismissRequest = { expandedDriverId = null }
-                    ) {
-                        trucks.forEach { truck ->
-                            DropdownMenuItem(
-                                text = { Text("${truck.name} (${truck.plateNumber})") },
-                                enabled = !truck.isShiftActive,
-                                onClick = {
-                                    onAssignTruck(driver.id, truck.id)
-                                    expandedDriverId = null
-                                }
-                            )
-                        }
-                    }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Allow early logout", fontWeight = FontWeight.SemiBold)
@@ -142,7 +108,6 @@ fun ManagerDriverAssignmentsScreen(
         }
     }
 }
-
 
 @Composable
 private fun DriverInviteQrCode(code: String) {
