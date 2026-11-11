@@ -7,11 +7,13 @@ on:
       - feat/offline-first-location-sync
       - feat/multi-tenant-fleet-management
       - security/harden-multitenant-access
+      - feat/driver-dynamic-truck-selection
   pull_request:
     branches:
       - main
       - feat/offline-first-location-sync
       - security/harden-multitenant-access
+      - feat/driver-dynamic-truck-selection
   workflow_dispatch:
 
 permissions:
