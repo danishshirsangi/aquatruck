@@ -372,7 +372,7 @@ object TenantManager {
             check(member.getString("role") == "driver" && member.getString("status") == "active") {
                 "Driver membership is not active."
             }
-            val active = member.getLong("activeTruckId")?.toInt()
+            val active = member.getLong("activeTruckId")?.toInt()?.takeIf { it > 0 }
             check(active == expectedOldId) { "Your truck assignment changed. Refresh and retry." }
             val old = oldRef?.let { tx.get(it) }
             val target = targetRef?.let { tx.get(it) }
