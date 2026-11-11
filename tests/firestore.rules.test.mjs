@@ -1,7 +1,7 @@
 import { before, after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebase/rules-unit-testing";
-import { doc, collection, getDoc, getDocs, query, where, setDoc, writeBatch } from "firebase/firestore";
+import { doc, collection, getDoc, getDocs, query, where, setDoc, writeBatch, runTransaction } from "firebase/firestore";
 
 const PROJECT_ID = "demo-aquatrack";
 const DATABASE_ID = "ai-studio-android-aquatrac-ae0f6f83-854d-4712-bbed-b747ec9132c0";
@@ -35,8 +35,9 @@ async function registerManagerBusiness() {
 async function registerDriverAndInvite(managerDb) {
   const batch = writeBatch(managerDb);
   const org = doc(managerDb, "organizations", ORG_ID);
-  batch.set(doc(org, "trucks", "truck_1"), { id: TRUCK_ID, truckNumber: TRUCK_ID, activeDriverUid: "", isShiftActive: false, statusText: "Off Duty" });
-  batch.set(doc(org, "trucks", "truck_2"), { id: 2, truckNumber: 2, activeDriverUid: "", isShiftActive: false, statusText: "Off Duty" });
+  batch.set(doc(org, "trucks", "truck_1"), { id: TRUCK_ID, truckNumber: TRUCK_ID, isShiftActive: false, statusText: "Off Duty" });
+  // Legacy records can contain a null claim owner rather than an absent/empty field.
+  batch.set(doc(org, "trucks", "truck_2"), { id: 2, truckNumber: 2, activeDriverUid: null, isShiftActive: false, statusText: "Off Duty" });
   batch.set(doc(org, "drivers", "driver_1"), { id: DRIVER_ID, name: "Test Driver", phone: "9999999999", assignedTruckId: 0, uid: "", status: "pending", invitationCode: INVITE_CODE });
   batch.set(doc(managerDb, "driver_invitations", INVITE_CODE), { organizationId: ORG_ID, businessName: "Test Water Company", driverId: DRIVER_ID, driverName: "Test Driver", phoneHash: "test-phone-hash", active: true, uid: "" });
   await assertSucceeds(batch.commit());
@@ -145,6 +146,33 @@ test("driver attendance is accepted only after the truck claim is active", async
 
   await claimTruckForDriver(driverDb);
   await assertSucceeds(setDoc(doc(driverDb, "organizations", ORG_ID, "attendance", "after-claim"), attendance));
+});
+
+test("driver can transactionally claim an inactive legacy truck with a null activeDriverUid", async () => {
+  const { driverDb } = await createCompleteBusinessAndDriver();
+  const memberRef = doc(driverDb, "organizations", ORG_ID, "members", DRIVER_UID);
+  const truckRef = doc(driverDb, "organizations", ORG_ID, "trucks", "truck_2");
+
+  await runTransaction(driverDb, async (transaction) => {
+    const memberSnapshot = await transaction.get(memberRef);
+    const truckSnapshot = await transaction.get(truckRef);
+    assert.equal(memberSnapshot.data().activeTruckId, 0);
+    assert.equal(truckSnapshot.data().activeDriverUid, null);
+    assert.equal(truckSnapshot.data().isShiftActive, false);
+
+    transaction.update(truckRef, {
+      activeDriverUid: DRIVER_UID,
+      isShiftActive: true,
+      statusText: "Shift Active - En Route",
+      lastUpdated: Date.now()
+    });
+    transaction.update(memberRef, { activeTruckId: 2 });
+  });
+
+  const claimedTruck = await assertSucceeds(getDoc(truckRef));
+  const member = await assertSucceeds(getDoc(memberRef));
+  assert.equal(claimedTruck.data().activeDriverUid, DRIVER_UID);
+  assert.equal(member.data().activeTruckId, 2);
 });
 
 test("driver cannot upload GPS for a truck they have not claimed", async () => {

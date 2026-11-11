@@ -212,7 +212,7 @@ service cloud.firestore {
                 "currentLat", "currentLng", "currentSpeedKmh",
                 "statusText", "lastUpdated", "driverName"
               ]))
-            || ((!("activeDriverUid" in resource.data) || resource.data.activeDriverUid == "")
+            || ((!("activeDriverUid" in resource.data) || resource.data.activeDriverUid == null || resource.data.activeDriverUid == "")
               && resource.data.isShiftActive != true
               && request.resource.data.activeDriverUid == request.auth.uid
               && request.resource.data.isShiftActive == true
@@ -221,7 +221,7 @@ service cloud.firestore {
                 "activeDriverUid", "isShiftActive", "statusText", "lastUpdated"
               ]))
             || ((resource.data.activeDriverUid == request.auth.uid
-                || ((!("activeDriverUid" in resource.data) || resource.data.activeDriverUid == "")
+                || ((!("activeDriverUid" in resource.data) || resource.data.activeDriverUid == null || resource.data.activeDriverUid == "")
                   && memberDoc(orgId).data.assignedTruckId == resource.data.id
                   && resource.data.isShiftActive == true))
               && request.resource.data.activeDriverUid == ""
