@@ -195,10 +195,12 @@ test("logout releases the active truck and blocks further GPS uploads", async ()
   const batch = writeBatch(driverDb);
   batch.update(doc(driverDb, "organizations", ORG_ID, "members", DRIVER_UID), { activeTruckId: 0 });
   batch.update(doc(driverDb, "organizations", ORG_ID, "trucks", "truck_1"), {
-    activeDriverUid: "", isShiftActive: false, statusText: "Off Duty"
+    activeDriverUid: "", lastDriverUid: DRIVER_UID, isShiftActive: false, statusText: "Off Duty"
   });
   await assertSucceeds(batch.commit());
-  await assertFails(setDoc(doc(driverDb, "organizations", ORG_ID, "location_points", "after-logout"), gpsPoint(93)));
+  const queuedPoint = { ...gpsPoint(93), driverUid: DRIVER_UID };
+  await assertSucceeds(setDoc(doc(driverDb, "organizations", ORG_ID, "location_points", "after-logout"), queuedPoint));
+  await assertFails(setDoc(doc(driverDb, "organizations", ORG_ID, "location_points", "wrong-driver-after-logout"), { ...gpsPoint(94), driverUid: "another-driver" }));
 });
 
 test("driver cannot access another organisation's GPS history", async () => {
