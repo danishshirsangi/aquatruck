@@ -30,3 +30,13 @@ Truck subscription records are stored at `organizations/{organizationId}/truck_s
 Each registered driver has a unique, one-time invitation code linked to the business, driver's registered phone number, and assigned truck. A code is deactivated after the driver claims it. Share individual codes only with the intended driver.
 
 The manager PIN is an additional in-app access gate. Firebase Authentication and Firestore Security Rules are the actual authorization boundary.
+
+## Troubleshooting: PERMISSION_DENIED on trucks, truck_subscriptions or location_points
+
+Every rule resolves access through `organizations/{orgId}/members/{uid}` (status `active`, role `manager` or `driver`). An organisation created before the multi-tenant hardening may contain only `drivers` and `attendance` and have no `members` or `users` documents, so all manager writes are denied and the `trucks`, `members`, `truck_subscriptions` and `location_points` collections never get created (Firestore only materialises a collection when its first document is written).
+
+- The app now calls `TenantManager.ensureManagerMembership()` before adding a truck. It creates the missing manager `members` and `users` documents; the rules accept this only when `organizations/{orgId}.ownerUid` is the signed-in uid.
+- Driver accounts that were claimed before hardening are repaired by `restoreMembership()` on next sign-in.
+- A truck and its test subscription are written in a single batch (`addTruckWithTestSubscription`).
+- A driver can read `location_points` only for the truck they currently hold: `members/{uid}.activeTruckId` must equal the point's `truckId`, and `trucks/truck_{id}` must exist with `activeDriverUid == uid` and `isShiftActive == true`.
+- Confirm the rules are deployed to the named database: `firebase deploy --only firestore:rules`.

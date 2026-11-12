@@ -68,25 +68,80 @@ class FirestoreSyncManager(private val context: Context) {
         }
     }
 
+    private fun truckData(truck: TruckEntity) = hashMapOf(
+        "id" to truck.id,
+        "truckNumber" to truck.id,
+        "name" to truck.name,
+        "plateNumber" to truck.plateNumber,
+        "driverName" to truck.driverName,
+        "capacityLiters" to truck.capacityLiters,
+        "currentLat" to truck.currentLat,
+        "currentLng" to truck.currentLng,
+        "currentSpeedKmh" to truck.currentSpeedKmh,
+        "isShiftActive" to truck.isShiftActive,
+        "statusText" to truck.statusText,
+        "lastUpdated" to truck.lastUpdated
+    )
+
+    /**
+     * Creates the truck document and its Rs.149 test subscription in ONE atomic batch so the
+     * two can never diverge (previously a subscription could exist without a truck, or the
+     * UI could show a truck that Firestore never accepted). Throws with a readable reason.
+     */
+    suspend fun addTruckWithTestSubscription(truck: TruckEntity) {
+        val user = auth.currentUser
+            ?: throw IllegalStateException("Your Google account is not signed in. Sign in again and retry.")
+        val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
+            .getString("organization_id", null)
+        if (orgId.isNullOrBlank()) {
+            throw IllegalStateException("No business is selected on this device. Sign out and sign in to your manager account again.")
+        }
+        val now = System.currentTimeMillis()
+        val orgRef = firestore.collection("organizations").document(orgId)
+        try {
+            val batch = firestore.batch()
+            batch.set(
+                orgRef.collection("trucks").document("truck_${truck.id}"),
+                truckData(truck),
+                SetOptions.merge()
+            )
+            batch.set(
+                orgRef.collection("truck_subscriptions").document(truck.id.toString()),
+                hashMapOf(
+                    "truckId" to truck.id,
+                    "amountPaise" to 14900,
+                    "currency" to "INR",
+                    "billingPeriod" to "monthly",
+                    "mode" to "test",
+                    "status" to "test_active",
+                    "startedAt" to now,
+                    "renewsAt" to now + 30L * 24L * 60L * 60L * 1000L,
+                    "createdBy" to user.uid
+                )
+            )
+            batch.commit().await()
+        } catch (e: Exception) {
+            Log.e("FirestoreSync", "Atomic truck + subscription write failed (orgId=$orgId, uid=${user.uid}, truckId=${truck.id}): ${e.message}", e)
+            val denied = (e as? com.google.firebase.firestore.FirebaseFirestoreException)?.code ==
+                com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED
+            throw IllegalStateException(
+                if (denied) {
+                    "Firestore denied adding this truck (PERMISSION_DENIED). Your account has no active manager " +
+                        "membership in this business, or the latest firestore.rules are not deployed to database " +
+                        "'${context.getString(R.string.firestore_database_id)}'."
+                } else {
+                    "Could not save the truck and test subscription: ${e.message ?: e.javaClass.simpleName}"
+                },
+                e
+            )
+        }
+    }
+
     suspend fun syncTruck(truck: TruckEntity): Boolean {
         if (auth.currentUser == null) return false
         return try {
-            val data = hashMapOf(
-                "id" to truck.id,
-                "truckNumber" to truck.id,
-                "name" to truck.name,
-                "plateNumber" to truck.plateNumber,
-                "driverName" to truck.driverName,
-                "capacityLiters" to truck.capacityLiters,
-                "currentLat" to truck.currentLat,
-                "currentLng" to truck.currentLng,
-                "currentSpeedKmh" to truck.currentSpeedKmh,
-                "isShiftActive" to truck.isShiftActive,
-                "statusText" to truck.statusText,
-                "lastUpdated" to truck.lastUpdated
-            )
             collection("trucks").document("truck_${truck.id}")
-                .set(data, SetOptions.merge())
+                .set(truckData(truck), SetOptions.merge())
                 .await()
             true
         } catch (e: Exception) {

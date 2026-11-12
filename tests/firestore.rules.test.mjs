@@ -290,3 +290,46 @@ test("offline queue uploads after network returns", async () => {
   assert.equal(uploaded.size, 5);
   assert.equal(localQueue.length, 0);
 });
+
+test("manager adds a truck and its test subscription in one atomic batch", async () => {
+  const { db: managerDb } = await registerManagerBusiness();
+  const org = doc(managerDb, "organizations", ORG_ID);
+  const batch = writeBatch(managerDb);
+  batch.set(doc(org, "trucks", "truck_3"), { id: 3, truckNumber: 3, name: "Truck 3", isShiftActive: false, statusText: "Off Duty" }, { merge: true });
+  batch.set(doc(org, "truck_subscriptions", "3"), {
+    truckId: 3, amountPaise: 14900, currency: "INR", billingPeriod: "monthly",
+    mode: "test", status: "test_active", startedAt: Date.now(), createdBy: MANAGER_UID
+  });
+  await assertSucceeds(batch.commit());
+  await assertSucceeds(getDoc(doc(org, "trucks", "truck_3")));
+  await assertSucceeds(getDoc(doc(org, "truck_subscriptions", "3")));
+});
+
+test("legacy organisation owner without a members document can bootstrap manager membership", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = dbFor(ctx);
+    await setDoc(doc(adminDb, "organizations", ORG_ID), { organizationId: ORG_ID, ownerUid: MANAGER_UID, status: "active" });
+    await setDoc(doc(adminDb, "organizations", ORG_ID, "drivers", "driver_1"), { id: 1, name: "Legacy Driver" });
+  });
+  const db = dbFor(testEnv.authenticatedContext(MANAGER_UID));
+  const org = doc(db, "organizations", ORG_ID);
+  // Before repair, manager writes are denied.
+  await assertFails(setDoc(doc(org, "trucks", "truck_1"), { id: 1, isShiftActive: false }));
+  const batch = writeBatch(db);
+  batch.set(doc(org, "members", MANAGER_UID), { uid: MANAGER_UID, role: "manager", name: "Owner", status: "active", createdAt: Date.now() });
+  batch.set(doc(db, "users", MANAGER_UID), { uid: MANAGER_UID, organizationId: ORG_ID, role: "manager", businessName: "Legacy Co", displayName: "Owner", updatedAt: Date.now() });
+  await assertSucceeds(batch.commit());
+  // After repair, the same truck write succeeds.
+  await assertSucceeds(setDoc(doc(org, "trucks", "truck_1"), { id: 1, isShiftActive: false }));
+});
+
+test("a non-owner cannot bootstrap manager membership in someone else's organisation", async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(dbFor(ctx), "organizations", ORG_ID), { organizationId: ORG_ID, ownerUid: MANAGER_UID, status: "active" });
+  });
+  const db = dbFor(testEnv.authenticatedContext("intruder-uid"));
+  const org = doc(db, "organizations", ORG_ID);
+  const batch = writeBatch(db);
+  batch.set(doc(org, "members", "intruder-uid"), { uid: "intruder-uid", role: "manager", name: "X", status: "active", createdAt: Date.now() });
+  await assertFails(batch.commit());
+});

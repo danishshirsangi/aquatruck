@@ -357,12 +357,10 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                     isShiftActive = false,
                     statusText = "Off Duty"
                 )
-                check(firestoreSync.recordTestTruckSubscription(nextId)) {
-                    "Could not save the ₹149 test subscription. Check your internet connection and manager access, then try again."
-                }
-                check(firestoreSync.syncTruck(newTruck)) {
-                    "Subscription was saved, but the truck could not be added to the business fleet. Please retry."
-                }
+                // Legacy organisations may have no members/{uid} document, which makes every
+                // manager write fail PERMISSION_DENIED. Repair/verify it before writing.
+                TenantManager.ensureManagerMembership(getApplication())
+                firestoreSync.addTruckWithTestSubscription(newTruck)
                 dao.insertTruck(newTruck)
                 if (_selectedTruckId.value == null) _selectedTruckId.value = nextId
                 runCatching { TenantManager.refreshFleetCache(getApplication()) }

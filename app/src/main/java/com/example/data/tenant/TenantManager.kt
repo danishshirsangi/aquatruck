@@ -167,8 +167,65 @@ object TenantManager {
             rememberMembership(context, orgId, memberRole, name)
             if (memberRole == "manager") loadManagerPin(context, orgId, user.uid)
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.w("TenantManager", "restoreMembership failed, falling back to cached membership: ${e.message}", e)
             hasActiveOrganization(context)
+        }
+    }
+
+    /**
+     * Guarantees organizations/{orgId}/members/{uid} exists as an active manager before any
+     * manager write. Organisations created before the multi-tenant hardening may have
+     * drivers/attendance but no members (or users) documents; the rules then deny every
+     * manager write (trucks, truck_subscriptions, location_points...) with PERMISSION_DENIED.
+     *
+     * The create is accepted by the rules only when organizations/{orgId}.ownerUid equals the
+     * signed-in uid, so a non-owner cannot escalate. Throws a readable error otherwise.
+     */
+    suspend fun ensureManagerMembership(context: Context) {
+        val user = Firebase.auth.currentUser
+            ?: throw IllegalStateException("Your Google account is not signed in. Sign in again and retry.")
+        val orgId = organizationId(context)
+            ?: throw IllegalStateException("No business is selected on this device. Sign out and sign in again.")
+        check(role(context) == "manager") { "Only a manager can do this." }
+        val db = firestore(context)
+        val orgRef = db.collection("organizations").document(orgId)
+        val memberRef = orgRef.collection("members").document(user.uid)
+        try {
+            val existing = memberRef.get().await()
+            if (existing.exists()) {
+                check(existing.getString("status") == "active" && existing.getString("role") == "manager") {
+                    "Your membership in this business is not an active manager membership."
+                }
+                return
+            }
+            val now = System.currentTimeMillis()
+            val name = user.displayName?.takeIf { it.isNotBlank() } ?: "Manager"
+            val batch = db.batch()
+            batch.set(memberRef, mapOf(
+                "uid" to user.uid, "role" to "manager", "name" to name,
+                "status" to "active", "createdAt" to now
+            ))
+            batch.set(db.collection("users").document(user.uid), mapOf(
+                "uid" to user.uid,
+                "organizationId" to orgId,
+                "role" to "manager",
+                "businessName" to (businessName(context) ?: "My Business"),
+                "displayName" to name,
+                "updatedAt" to now
+            ))
+            batch.commit().await()
+            android.util.Log.i("TenantManager", "Repaired missing manager membership (orgId=$orgId, uid=${user.uid})")
+        } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
+            android.util.Log.e("TenantManager", "ensureManagerMembership failed (orgId=$orgId, uid=${user.uid}): ${e.code} ${e.message}", e)
+            if (e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                throw IllegalStateException(
+                    "This account has no manager membership in the selected business and is not its owner, " +
+                        "so Firestore refused to create one. Sign in with the account that registered the business.",
+                    e
+                )
+            }
+            throw e
         }
     }
 
@@ -506,13 +563,29 @@ object TenantManager {
         }
 
         val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
-        val locationDocs = if (isManager) {
-            root.collection("location_points").whereGreaterThanOrEqualTo("timestamp", cutoff).get().await().documents
-        } else if (assignedId != null) {
-            root.collection("location_points")
-                .whereGreaterThanOrEqualTo("timestamp", cutoff)
-                .whereEqualTo("truckId", assignedId).get().await().documents
-        } else emptyList()
+        val locationDocs = try {
+            if (isManager) {
+                root.collection("location_points").whereGreaterThanOrEqualTo("timestamp", cutoff).get().await().documents
+            } else if (assignedId != null) {
+                // Rules only let a driver read points for the truck they actively hold
+                // (member.activeTruckId == truckId AND truck.activeDriverUid == uid AND shift active).
+                root.collection("location_points")
+                    .whereGreaterThanOrEqualTo("timestamp", cutoff)
+                    .whereEqualTo("truckId", assignedId).get().await().documents
+            } else emptyList()
+        } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
+            if (e.code != com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) throw e
+            // The history cache is optional; do not abort the rest of the refresh (trucks, drivers,
+            // stops, attendance) because breadcrumb history is not readable right now.
+            android.util.Log.e(
+                "TenantManager",
+                "location_points read denied (orgId=$orgId, uid=$uid, role=$memberRole, activeTruckId=$assignedId). " +
+                    "Check that organizations/$orgId/trucks/truck_$assignedId exists with activeDriverUid=$uid " +
+                    "and isShiftActive=true, and that members/$uid.activeTruckId matches.",
+                e
+            )
+            emptyList()
+        }
         locationDocs.forEach { doc ->
             val truckId = (doc.getLong("truckId") ?: return@forEach).toInt()
             val timestamp = doc.getLong("timestamp") ?: return@forEach
