@@ -223,6 +223,10 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             _loggedInTruckId.value = savedTruckId
             _selectedTruckId.value = savedTruckId
             _loggedInDriverName.value = savedDriverName
+        } else if (LocationTrackingService.hasPersistedSession(application)) {
+            // No driver session exists, but a foreground GPS service from an earlier shift is
+            // still persisted (this is the lingering location icon). Stop it.
+            LocationTrackingService.stopService(application)
         }
 
         viewModelScope.launch {
@@ -236,9 +240,19 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                     if (list.isNotEmpty()) {
                         val truck = list.firstOrNull { it.id == currentLoggedIn }
                         if (truck == null || !truck.isShiftActive) {
+                            // The shift ended (for example the manager pressed End Shift). The
+                            // background GPS service must not outlive the session.
                             _loggedInTruckId.value = null
                             _loggedInDriverName.value = null
                             sessionPrefs.edit().clear().apply()
+                            if (LocationTrackingService.hasPersistedSession(getApplication())) {
+                                LocationTrackingService.stopService(getApplication())
+                            }
+                            viewModelScope.launch(Dispatchers.IO) {
+                                dao.getActiveAttendanceDirect(currentLoggedIn)?.let {
+                                    dao.updateAttendance(it.copy(checkOutTime = System.currentTimeMillis(), isCompleted = true))
+                                }
+                            }
                         }
                     }
                 } else if (TenantManager.role(getApplication()) == "driver") {
@@ -568,7 +582,9 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                     lastUpdated = now
                 )
                 dao.updateTruck(offDutyTruck)
-                firestoreSync.syncTruck(offDutyTruck)
+                if (!firestoreSync.syncTruck(offDutyTruck)) {
+                    android.util.Log.e("FleetViewModel", "End shift was NOT written to Firestore for truck $truckId; the driver's phone will not stop tracking.")
+                }
             }
 
             // 3. Unlock driver session & clear persisted session so driver can choose truck/identity on next shift
