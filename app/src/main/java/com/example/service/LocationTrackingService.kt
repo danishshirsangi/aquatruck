@@ -21,6 +21,11 @@ import com.example.data.firebase.FirestoreSyncManager
 import com.example.data.model.LocationPoint
 import com.example.data.model.StopRecord
 import com.example.data.sync.LocationSyncScheduler
+import com.example.data.tenant.TenantManager
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.example.util.LocationUtils
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -51,6 +56,8 @@ class LocationTrackingService : Service() {
     private val locationChannel = Channel<TrackingSample>(Channel.UNLIMITED)
     private var locationProcessorJob: Job? = null
     private var liveTruckSyncJob: Job? = null
+    private var remoteShiftListener: ListenerRegistration? = null
+    @Volatile private var remoteEndHandled = false
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var locationCallback: LocationCallback? = null
@@ -115,6 +122,10 @@ class LocationTrackingService : Service() {
             }
         }
 
+        /** True while a driver shift is persisted for this service (it would be restored after process death). */
+        fun hasPersistedSession(context: Context): Boolean =
+            context.getSharedPreferences(SESSION_PREFS, Context.MODE_PRIVATE).getInt(PREF_TRUCK_ID, -1) > 0
+
         fun stopService(context: Context) {
             val intent = Intent(context, LocationTrackingService::class.java).apply {
                 action = ACTION_STOP_TRACKING
@@ -172,9 +183,11 @@ class LocationTrackingService : Service() {
                     buildNotification("Shift Active: $activeTruckName", "GPS tracking • adaptive 20s / 3m")
                 )
                 startTrackingLoop()
+                startRemoteShiftWatcher(activeTruckId)
             }
 
             ACTION_STOP_TRACKING -> {
+                stopRemoteShiftWatcher()
                 stopLocationUpdates()
                 isTracking = false
                 locationChannel.close()
@@ -224,6 +237,7 @@ class LocationTrackingService : Service() {
                     buildNotification("Shift Active: $activeTruckName", "Restoring GPS tracking • adaptive 20s / 3m")
                 )
                 startTrackingLoop()
+                startRemoteShiftWatcher(activeTruckId)
             }
 
             else -> return START_NOT_STICKY
@@ -439,11 +453,55 @@ class LocationTrackingService : Service() {
     }
 
     override fun onDestroy() {
+        stopRemoteShiftWatcher()
         isTracking = false
         stopLocationUpdates()
         locationChannel.close()
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    /**
+     * A manager can end a driver's shift from their own device. The driver's phone must then stop
+     * tracking immediately, even when the app UI is closed, so the service watches the server copy
+     * of its truck document. Updating the local Room truck to off-duty (done by the stop path) also
+     * makes the driver screen leave the shift view instantly.
+     */
+    private fun startRemoteShiftWatcher(truckId: Int) {
+        stopRemoteShiftWatcher()
+        remoteEndHandled = false
+        if (TenantManager.role(applicationContext) != "driver") return
+        val orgId = TenantManager.organizationId(applicationContext) ?: return
+        val uid = Firebase.auth.currentUser?.uid ?: return
+        remoteShiftListener = FirebaseFirestore.getInstance(getString(R.string.firestore_database_id))
+            .collection("organizations").document(orgId)
+            .collection("trucks").document("truck_$truckId")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("LocationTrackingService", "Remote shift watcher error: ${error.message}")
+                    return@addSnapshotListener
+                }
+                // Ignore cached / optimistic snapshots; only act on confirmed server state.
+                if (snapshot == null || !snapshot.exists() || snapshot.metadata.isFromCache ||
+                    snapshot.metadata.hasPendingWrites()) return@addSnapshotListener
+                val active = snapshot.getBoolean("isShiftActive") == true
+                val owner = snapshot.getString("activeDriverUid").orEmpty()
+                if ((!active || (owner.isNotEmpty() && owner != uid)) && !remoteEndHandled) {
+                    remoteEndHandled = true
+                    Log.i("LocationTrackingService", "Shift ended remotely for truck $truckId (active=$active owner='$owner'); stopping GPS tracking.")
+                    serviceScope.launch {
+                        // Release this driver's claim so the truck/driver can start cleanly next time.
+                        runCatching { TenantManager.changeActiveTruck(applicationContext, truckId, null) }
+                            .onFailure { Log.w("LocationTrackingService", "Remote-end claim release failed: ${it.message}") }
+                        withContext(Dispatchers.Main) { LocationTrackingService.stopService(applicationContext) }
+                    }
+                }
+            }
+    }
+
+    private fun stopRemoteShiftWatcher() {
+        remoteShiftListener?.remove()
+        remoteShiftListener = null
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
