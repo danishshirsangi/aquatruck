@@ -639,12 +639,19 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             // Update truck coordinates and record location breadcrumb
             if (lat != 0.0 || lng != 0.0) {
                 dao.updateTruckLocation(truckId, lat, lng, 0f, "Water Delivered - $timeLabel", now)
+            }
+            // Only add a trail breadcrumb for a genuinely accurate live fix. A stale or coarse
+            // position (previously labelled "3 m") drew false spikes on the manager map.
+            if (freshLocation != null &&
+                (freshLocation.latitude != 0.0 || freshLocation.longitude != 0.0) &&
+                (!freshLocation.hasAccuracy() || freshLocation.accuracy <= LocationTrackingService.MAX_ACCEPTABLE_ACCURACY_METERS)
+            ) {
                 val point = LocationPoint(
                     truckId = truckId,
                     latitude = lat,
                     longitude = lng,
                     speedKmh = 0f,
-                    accuracyMeters = freshLocation?.accuracy ?: 3f,
+                    accuracyMeters = freshLocation.accuracy,
                     timestamp = now
                 )
                 dao.insertLocationPoint(point)
@@ -653,6 +660,9 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
 
             // Save Voice Delivery Note with exact GPS coordinates and address
             val note = VoiceDeliveryNote(
+                // Same id the Firestore import uses, so the synced copy replaces this row
+                // instead of appearing as a second recording.
+                id = TenantManager.stableLocalRecordId(truckId, now),
                 truckId = truckId,
                 driverName = driverName,
                 audioFilePath = audioPath,
@@ -686,11 +696,13 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             // Save Stop Record
+            val stopStartTime = now - (durationSec * 1000L).coerceAtLeast(30000L)
             val stop = StopRecord(
+                id = TenantManager.stableLocalRecordId(truckId, stopStartTime),
                 truckId = truckId,
                 latitude = lat,
                 longitude = lng,
-                startTime = now - (durationSec * 1000L).coerceAtLeast(30000L),
+                startTime = stopStartTime,
                 endTime = now,
                 durationMinutes = ((durationSec / 60) + 1).coerceAtLeast(1),
                 addressOrLabel = "Water Delivery: $locationLabel",

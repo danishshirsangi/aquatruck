@@ -18,6 +18,7 @@ import com.google.firebase.storage.StorageMetadata
 import java.io.File
 import android.net.Uri
 import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.tasks.await
 
 class FirestoreSyncManager(private val context: Context) {
@@ -277,9 +278,18 @@ class FirestoreSyncManager(private val context: Context) {
                 "locationLabel" to note.locationLabel,
                 "timestamp" to note.timestamp
             )
-            collection("voice_delivery_notes").document("voice_${note.truckId}_${note.timestamp}")
-                .set(data, SetOptions.merge())
-                .await()
+            val voiceRef = collection("voice_delivery_notes").document("voice_${note.truckId}_${note.timestamp}")
+            try {
+                voiceRef.set(data, SetOptions.merge()).await()
+            } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
+                if (e.code != com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) throw e
+                // A valid claim can be rejected once right after the app resumes or the sign-in
+                // token rotates. Refresh the token and retry once before reporting a failure.
+                Log.w("FirestoreSync", "Voice note write denied; refreshing sign-in token and retrying once")
+                runCatching { auth.currentUser?.getIdToken(true)?.await() }
+                delay(1500)
+                voiceRef.set(data, SetOptions.merge()).await()
+            }
             true
         } catch (e: Exception) {
             Log.w("FirestoreSync", "Error syncing voice note to Supabase: ${e.message}", e)

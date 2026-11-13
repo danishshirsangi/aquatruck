@@ -561,7 +561,7 @@ fun InteractiveFleetMap(
                         color = OceanNavyPrimary
                     )
                     Text(
-                        text = "Surrounding roads and city network loaded. Start a driver shift to track live truck movement every 10s.",
+                        text = "Surrounding roads and city network loaded. Start a driver shift to track live truck movement every 15s.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,

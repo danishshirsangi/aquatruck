@@ -146,6 +146,12 @@ interface FleetDao {
     @Query("SELECT * FROM voice_delivery_notes WHERE timestamp >= :startTime AND timestamp <= :endTime ORDER BY timestamp DESC")
     fun getVoiceNotesBetween(startTime: Long, endTime: Long): Flow<List<VoiceDeliveryNote>>
 
+    @Query("DELETE FROM voice_delivery_notes WHERE id NOT IN (SELECT MAX(id) FROM voice_delivery_notes GROUP BY truckId, timestamp)")
+    suspend fun deleteDuplicateVoiceNotes()
+
+    @Query("DELETE FROM stop_records WHERE id NOT IN (SELECT MAX(id) FROM stop_records GROUP BY truckId, startTime)")
+    suspend fun deleteDuplicateStops()
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertVoiceNote(note: VoiceDeliveryNote): Long
 

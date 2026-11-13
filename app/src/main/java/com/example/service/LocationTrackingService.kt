@@ -70,6 +70,8 @@ class LocationTrackingService : Service() {
     private var currentPriority = -1
     private var isTracking = false
     private var previousLocation: Location? = null
+    private var lastAcceptedFix: Location? = null
+    private var consecutiveJumpsRejected = 0
     private var stationarySamples = 0
     private var lastNotificationStatus: String? = null
     private var lastTruckSyncAt: Long = 0L
@@ -89,11 +91,16 @@ class LocationTrackingService : Service() {
     companion object {
         const val CHANNEL_ID = "aquatrack_fleet_tracking"
         const val NOTIFICATION_ID = 1001
-        private const val MOVING_INTERVAL_MS = 20_000L
+        // Moving cadence (was 20s). Change this single constant to 10_000L for 10-second tracking.
+        private const val MOVING_INTERVAL_MS = 15_000L
         private const val STATIONARY_INTERVAL_MS = 3 * 60_000L
         private const val MOVEMENT_DISTANCE_METERS = 25f
         private const val STATIONARY_SPEED_KMH = 2.5f
         private const val STATIONARY_SAMPLES_REQUIRED = 3
+        // GPS quality gates: fixes worse than this, or implying an impossible jump, are dropped.
+        const val MAX_ACCEPTABLE_ACCURACY_METERS = 50f
+        private const val MAX_PLAUSIBLE_SPEED_KMH = 160.0
+        private const val MAX_CONSECUTIVE_JUMPS_REJECTED = 3
 
         private const val SESSION_PREFS = "aquatrack_tracking_service"
         private const val PREF_TRUCK_ID = "active_truck_id"
@@ -156,6 +163,7 @@ class LocationTrackingService : Service() {
         locationProcessorJob = serviceScope.launch {
             for (sample in locationChannel) {
                 try {
+                    if (!isAcceptableFix(sample.location)) continue
                     updateTrackingMode(sample.location)
                     handleNewLocation(sample.location, sample.truckId)
                 } catch (e: kotlinx.coroutines.CancellationException) {
@@ -180,7 +188,7 @@ class LocationTrackingService : Service() {
 
                 startForeground(
                     NOTIFICATION_ID,
-                    buildNotification("Shift Active: $activeTruckName", "GPS tracking • adaptive 20s / 3m")
+                    buildNotification("Shift Active: $activeTruckName", "GPS tracking • adaptive 15s / 3m")
                 )
                 startTrackingLoop()
                 startRemoteShiftWatcher(activeTruckId)
@@ -234,7 +242,7 @@ class LocationTrackingService : Service() {
 
                 startForeground(
                     NOTIFICATION_ID,
-                    buildNotification("Shift Active: $activeTruckName", "Restoring GPS tracking • adaptive 20s / 3m")
+                    buildNotification("Shift Active: $activeTruckName", "Restoring GPS tracking • adaptive 15s / 3m")
                 )
                 startTrackingLoop()
                 startRemoteShiftWatcher(activeTruckId)
@@ -250,6 +258,8 @@ class LocationTrackingService : Service() {
         if (isTracking) stopLocationUpdates()
 
         previousLocation = null
+        lastAcceptedFix = null
+        consecutiveJumpsRejected = 0
         stationarySamples = 0
         currentIntervalMillis = 0L
         currentPriority = -1
@@ -300,6 +310,34 @@ class LocationTrackingService : Service() {
         }
     }
 
+    /**
+     * Drops GPS fixes that would draw false spikes on the trail: poor accuracy (typical of
+     * cell/Wi-Fi fixes) and physically impossible jumps from the previous good fix. If several
+     * consecutive fixes all "jump" to the same new place, the move is real (or the first fix
+     * was the bad one) and the new position is accepted.
+     */
+    private fun isAcceptableFix(location: Location): Boolean {
+        if (location.hasAccuracy() && location.accuracy > MAX_ACCEPTABLE_ACCURACY_METERS) {
+            Log.i("LocationTrackingService", "Dropped low-accuracy fix (${location.accuracy.toInt()} m)")
+            return false
+        }
+        val last = lastAcceptedFix
+        if (last != null && location.time > last.time) {
+            val meters = last.distanceTo(location)
+            val impliedKmh = meters / ((location.time - last.time) / 1000.0) * 3.6
+            if (meters > 100f && impliedKmh > MAX_PLAUSIBLE_SPEED_KMH) {
+                consecutiveJumpsRejected++
+                if (consecutiveJumpsRejected < MAX_CONSECUTIVE_JUMPS_REJECTED) {
+                    Log.i("LocationTrackingService", "Dropped implausible jump (${meters.toInt()} m, ${impliedKmh.toInt()} km/h)")
+                    return false
+                }
+            }
+        }
+        consecutiveJumpsRejected = 0
+        lastAcceptedFix = Location(location)
+        return true
+    }
+
     private fun updateTrackingMode(location: Location) {
         val previous = previousLocation
         val movedMeters = if (previous == null) Float.MAX_VALUE else previous.distanceTo(location)
@@ -312,11 +350,12 @@ class LocationTrackingService : Service() {
         } else {
             stationarySamples++
             if (stationarySamples >= STATIONARY_SAMPLES_REQUIRED) {
-                // Balanced power plus a modest stationary distance threshold reduces unnecessary
-                // callbacks. The three-minute interval remains unchanged.
+                // Same three-minute interval as before, but with high-accuracy GPS: the old
+                // balanced-power mode used cell/Wi-Fi positions that landed hundreds of metres
+                // away and drew straight spike lines across the manager map.
                 requestLocationUpdates(
                     STATIONARY_INTERVAL_MS,
-                    Priority.PRIORITY_BALANCED_POWER_ACCURACY
+                    Priority.PRIORITY_HIGH_ACCURACY
                 )
             }
         }

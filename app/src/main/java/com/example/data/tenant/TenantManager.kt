@@ -526,7 +526,7 @@ object TenantManager {
                 "truck $truckId is held by '${truck.getString("activeDriverUid").orEmpty()}', not you. Log out and start again"
             truck.getBoolean("isShiftActive") != true ->
                 "truck $truckId shows its shift as ended. Log out and start again"
-            else -> "claim looks valid; the deployed firestore.rules may differ from this branch"
+            else -> "claim looks valid, so this is usually a brief sign-in/token delay. It retries automatically"
         }
     }
 
@@ -672,6 +672,11 @@ object TenantManager {
             ))
         }
 
+        // Earlier builds saved local records under a different id than their synced copy, which
+        // showed every recording twice on the driver screen. Keep one row per recording/stop.
+        dao.deleteDuplicateVoiceNotes()
+        dao.deleteDuplicateStops()
+
         val attendanceCollection = root.collection("attendance")
         val attendanceDocs = if (isManager) attendanceCollection.get().await().documents
             else if (assignedId != null) attendanceCollection.whereEqualTo("truckId", assignedId).get().await().documents
@@ -748,7 +753,8 @@ object TenantManager {
         )
     }
 
-    private fun stableLocalRecordId(truckId: Int, timestamp: Long): Long =
+    /** Same id the Firestore import derives, so a locally created record and its synced copy are ONE row. */
+    fun stableLocalRecordId(truckId: Int, timestamp: Long): Long =
         truckId.toLong().coerceAtLeast(0L) * 3_000_000_000_000L +
             (timestamp % 3_000_000_000_000L)
 

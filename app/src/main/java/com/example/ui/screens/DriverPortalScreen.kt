@@ -680,7 +680,7 @@ fun DriverPortalScreen(
                                             color = StatusActiveGreen
                                         )
                                         Text(
-                                            text = "Background location active every 10s",
+                                            text = "Background location active every 15s",
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
