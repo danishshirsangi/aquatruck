@@ -52,10 +52,13 @@ async function getMembership(orgId: string, uid: string, token: string) {
   const role = field(document, "role");
   const status = field(document, "status");
   const assignedTruckId = Number(field(document, "assignedTruckId") ?? 0);
+  // Drivers claim a truck when a shift starts; that claim lives in activeTruckId.
+  // assignedTruckId is only an optional manager preselection and is often 0.
+  const activeTruckId = Number(field(document, "activeTruckId") ?? 0);
   if (status !== "active" || !["manager", "driver"].includes(String(role))) {
     throw new Error("Active business membership required");
   }
-  return { role: String(role), assignedTruckId };
+  return { role: String(role), assignedTruckId, activeTruckId };
 }
 
 function safePart(value: string) {
@@ -112,8 +115,9 @@ Deno.serve(async (request) => {
     }
 
     const membership = await getMembership(orgId, uid, token);
-    if (membership.role === "driver" && membership.assignedTruckId !== truckId) {
-      return json({ error: "This recording does not belong to your assigned truck" }, 403);
+    if (membership.role === "driver" &&
+        membership.activeTruckId !== truckId && membership.assignedTruckId !== truckId) {
+      return json({ error: "This recording does not belong to the truck you are driving" }, 403);
     }
 
     const objectPath = `organizations/${orgId}/voice/voice_${truckId}_${timestamp}.${extension}`;

@@ -29,6 +29,9 @@ class FirestoreSyncManager(private val context: Context) {
 
     private val auth get() = Firebase.auth
 
+    /** Last human-readable reason a voice note failed to upload (shown in the driver UI). */
+    @Volatile var lastVoiceSyncError: String? = null
+
     private fun collection(name: String): CollectionReference {
         val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
             .getString("organization_id", null)
@@ -252,6 +255,7 @@ class FirestoreSyncManager(private val context: Context) {
     suspend fun syncVoiceNote(note: VoiceDeliveryNote): Boolean {
         if (auth.currentUser == null) return false
         return try {
+            lastVoiceSyncError = null
             val localFile = File(note.audioFilePath)
             val orgId = context.getSharedPreferences("aquatrack_tenant", Context.MODE_PRIVATE)
                 .getString("organization_id", null)
@@ -279,6 +283,7 @@ class FirestoreSyncManager(private val context: Context) {
             true
         } catch (e: Exception) {
             Log.w("FirestoreSync", "Error syncing voice note to Supabase: ${e.message}", e)
+            lastVoiceSyncError = e.message ?: e.javaClass.simpleName
             false
         }
     }
@@ -349,6 +354,45 @@ class FirestoreSyncManager(private val context: Context) {
             )
             false
         }
+    }
+
+    /**
+     * Fallback used when a whole batch is rejected. One bad point (for example a truck that has
+     * no Firestore document, or a point from a shift that is no longer claimed) must not block
+     * every other point. Returns ids that were written and ids that were permanently denied by
+     * the security rules; any other id failed for a transient reason and should be retried.
+     */
+    suspend fun syncLocationPointsIndividually(points: List<LocationPoint>): Pair<Set<Long>, Set<Long>> {
+        val ok = mutableSetOf<Long>()
+        val denied = mutableSetOf<Long>()
+        val uid = auth.currentUser?.uid ?: return ok to denied
+        for (point in points) {
+            try {
+                collection("location_points").document("loc_${point.truckId}_${point.timestamp}")
+                    .set(hashMapOf(
+                        "id" to point.id,
+                        "driverUid" to uid,
+                        "truckId" to point.truckId,
+                        "latitude" to point.latitude,
+                        "longitude" to point.longitude,
+                        "speedKmh" to point.speedKmh,
+                        "accuracyMeters" to point.accuracyMeters,
+                        "timestamp" to point.timestamp,
+                        "expireAt" to java.util.Date(point.timestamp + 30L * 24L * 60L * 60L * 1000L)
+                    ), SetOptions.merge()).await()
+                ok += point.id
+            } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
+                if (e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                    Log.w("FirestoreSync", "Point denied by rules (truckId=${point.truckId}, ts=${point.timestamp}, uid=$uid)")
+                    denied += point.id
+                } else {
+                    Log.w("FirestoreSync", "Transient point upload failure: ${e.code} ${e.message}")
+                }
+            } catch (e: Exception) {
+                Log.w("FirestoreSync", "Point upload failed: ${e.message}")
+            }
+        }
+        return ok to denied
     }
 
     suspend fun syncStop(stop: StopRecord): Boolean {

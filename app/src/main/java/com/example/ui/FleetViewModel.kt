@@ -551,8 +551,10 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     TenantManager.changeActiveTruck(context, truckId, null)
                 } catch (e: Exception) {
-                    android.util.Log.w("FleetViewModel", "Unable to release truck on logout: " + e.message, e)
-                    return@launch
+                    // Never trap the driver in a shift (previously this returned and the only way
+                    // out was reinstalling). The next shift start reads the authoritative claim from
+                    // Firestore and releases any stale one, so continue with the local logout.
+                    android.util.Log.w("FleetViewModel", "Unable to release truck remotely on logout; continuing local logout: " + e.message, e)
                 }
             }
 
@@ -654,7 +656,12 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 dao.markVoiceNotesSynced(listOf(savedNoteId))
                 _voiceUploadStatus.value = "Uploaded successfully"
             } else {
-                _voiceUploadStatus.value = "Upload pending — will retry when connected"
+                val reason = firestoreSync.lastVoiceSyncError
+                _voiceUploadStatus.value = if (reason.isNullOrBlank()) {
+                    "Upload pending — will retry when connected"
+                } else {
+                    "Upload pending — $reason"
+                }
                 LocationSyncScheduler.enqueue(context)
             }
 
