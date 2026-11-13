@@ -657,10 +657,14 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                 _voiceUploadStatus.value = "Uploaded successfully"
             } else {
                 val reason = firestoreSync.lastVoiceSyncError
-                _voiceUploadStatus.value = if (reason.isNullOrBlank()) {
-                    "Upload pending — will retry when connected"
-                } else {
-                    "Upload pending — $reason"
+                val detail = if (reason?.contains("PERMISSION_DENIED") == true) {
+                    runCatching { TenantManager.describeTruckClaim(context, truckId) }.getOrNull()
+                } else null
+                android.util.Log.w("FleetViewModel", "Voice note upload pending. error=$reason claim=$detail")
+                _voiceUploadStatus.value = when {
+                    detail != null -> "Upload blocked: $detail"
+                    reason.isNullOrBlank() -> "Upload pending — will retry when connected"
+                    else -> "Upload pending — $reason"
                 }
                 LocationSyncScheduler.enqueue(context)
             }

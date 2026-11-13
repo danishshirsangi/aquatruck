@@ -503,6 +503,33 @@ object TenantManager {
         }.await()
     }
 
+    /**
+     * Explains, from the authoritative Firestore documents, why a driver's writes for [truckId]
+     * are being rejected. The rules (ownsTruck) require ALL of: active driver membership,
+     * member.activeTruckId == truckId, trucks/truck_{id} existing with activeDriverUid == uid,
+     * and isShiftActive == true.
+     */
+    suspend fun describeTruckClaim(context: Context, truckId: Int): String {
+        val uid = Firebase.auth.currentUser?.uid ?: return "you are signed out"
+        val orgId = organizationId(context) ?: return "no business selected on this device"
+        val root = firestore(context).collection("organizations").document(orgId)
+        val member = root.collection("members").document(uid).get().await()
+        val truck = root.collection("trucks").document("truck_$truckId").get().await()
+        val memberTruck = member.getLong("activeTruckId")
+        return when {
+            !member.exists() -> "your membership document is missing"
+            member.getString("status") != "active" -> "your membership is not active"
+            memberTruck != truckId.toLong() ->
+                "truck $truckId is not recorded as yours (activeTruckId=${memberTruck ?: 0}). Log out and start the shift again"
+            !truck.exists() -> "truck $truckId does not exist in Firestore. Ask your manager to re-add it"
+            truck.getString("activeDriverUid") != uid ->
+                "truck $truckId is held by '${truck.getString("activeDriverUid").orEmpty()}', not you. Log out and start again"
+            truck.getBoolean("isShiftActive") != true ->
+                "truck $truckId shows its shift as ended. Log out and start again"
+            else -> "claim looks valid; the deployed firestore.rules may differ from this branch"
+        }
+    }
+
     suspend fun refreshFleetCache(context: Context) {
         val orgId = organizationId(context) ?: return
         val uid = Firebase.auth.currentUser?.uid ?: return
