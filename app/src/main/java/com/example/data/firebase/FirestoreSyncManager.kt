@@ -310,6 +310,7 @@ class FirestoreSyncManager(private val context: Context) {
                 "speedKmh" to point.speedKmh,
                 "accuracyMeters" to point.accuracyMeters,
                 "timestamp" to point.timestamp,
+                "shiftSessionId" to point.shiftSessionId,
                 "expireAt" to java.util.Date(point.timestamp + 30L * 24L * 60L * 60L * 1000L)
             )
             collection("location_points").document("loc_${point.truckId}_${point.timestamp}")
@@ -340,6 +341,7 @@ class FirestoreSyncManager(private val context: Context) {
                         "speedKmh" to point.speedKmh,
                         "accuracyMeters" to point.accuracyMeters,
                         "timestamp" to point.timestamp,
+                        "shiftSessionId" to point.shiftSessionId,
                         "expireAt" to java.util.Date(point.timestamp + 30L * 24L * 60L * 60L * 1000L)
                     )
                     batch.set(
@@ -388,6 +390,7 @@ class FirestoreSyncManager(private val context: Context) {
                         "speedKmh" to point.speedKmh,
                         "accuracyMeters" to point.accuracyMeters,
                         "timestamp" to point.timestamp,
+                        "shiftSessionId" to point.shiftSessionId,
                         "expireAt" to java.util.Date(point.timestamp + 30L * 24L * 60L * 60L * 1000L)
                     ), SetOptions.merge()).await()
                 ok += point.id

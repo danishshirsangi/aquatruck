@@ -24,7 +24,7 @@ import com.example.data.model.VoiceDeliveryNote
         DeliveryProof::class,
         VoiceDeliveryNote::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -72,6 +72,13 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE location_points ADD COLUMN shiftSessionId TEXT NOT NULL DEFAULT ''")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_location_points_truckId_shiftSessionId_timestamp ON location_points(truckId, shiftSessionId, timestamp)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -82,7 +89,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "aquatrack_fleet.db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .build()
                 INSTANCE = instance
                 instance

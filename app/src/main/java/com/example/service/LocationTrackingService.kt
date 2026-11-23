@@ -45,10 +45,11 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import java.util.UUID
 
 class LocationTrackingService : Service() {
 
-    private data class TrackingSample(val truckId: Int, val location: Location)
+    private data class TrackingSample(val truckId: Int, val shiftSessionId: String, val location: Location)
 
     // A single consumer serializes GPS samples and keeps each sample attached to the
     // tanker that was active when Android delivered that GPS callback.
@@ -65,6 +66,7 @@ class LocationTrackingService : Service() {
     @Volatile
     private var activeTruckId: Int = 1
     private var activeTruckName: String = "Water Tanker"
+    @Volatile private var activeShiftSessionId: String = ""
 
     private var currentIntervalMillis = 0L
     private var currentPriority = -1
@@ -91,6 +93,7 @@ class LocationTrackingService : Service() {
     companion object {
         const val CHANNEL_ID = "aquatrack_fleet_tracking"
         const val NOTIFICATION_ID = 1001
+        private const val PREF_SHIFT_SESSION_ID = "active_shift_session_id"
         // Moving cadence (was 20s). Change this single constant to 10_000L for 10-second tracking.
         private const val MOVING_INTERVAL_MS = 15_000L
         private const val STATIONARY_INTERVAL_MS = 3 * 60_000L
@@ -151,7 +154,9 @@ class LocationTrackingService : Service() {
                 // Sort a delivered batch before enqueueing it, preserving chronological order.
                 result.locations.sortedBy { it.time }.forEach { location ->
                     if (location.latitude != 0.0 || location.longitude != 0.0) {
-                        val queued = locationChannel.trySend(TrackingSample(activeTruckId, Location(location)))
+                        val queued = locationChannel.trySend(
+                            TrackingSample(activeTruckId, activeShiftSessionId, Location(location))
+                        )
                         if (queued.isFailure) {
                             Log.w("LocationTrackingService", "Location queue is closed; sample was not queued.")
                         }
@@ -165,7 +170,7 @@ class LocationTrackingService : Service() {
                 try {
                     if (!isAcceptableFix(sample.location)) continue
                     updateTrackingMode(sample.location)
-                    handleNewLocation(sample.location, sample.truckId)
+                    handleNewLocation(sample.location, sample.truckId, sample.shiftSessionId)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -181,9 +186,12 @@ class LocationTrackingService : Service() {
             ACTION_START_TRACKING -> {
                 activeTruckId = intent.getIntExtra(EXTRA_TRUCK_ID, 1)
                 activeTruckName = intent.getStringExtra(EXTRA_TRUCK_NAME) ?: "Water Tanker $activeTruckId"
+                // Every explicit shift start gets a new route ID.
+                activeShiftSessionId = UUID.randomUUID().toString()
                 sessionPrefs.edit()
                     .putInt(PREF_TRUCK_ID, activeTruckId)
                     .putString(PREF_TRUCK_NAME, activeTruckName)
+                    .putString(PREF_SHIFT_SESSION_ID, activeShiftSessionId)
                     .apply()
 
                 startForeground(
@@ -218,7 +226,12 @@ class LocationTrackingService : Service() {
                     } catch (e: Exception) {
                         Log.e("LocationTrackingService", "Failed while stopping tracking cleanly", e)
                     } finally {
-                        sessionPrefs.edit().remove(PREF_TRUCK_ID).remove(PREF_TRUCK_NAME).apply()
+                        sessionPrefs.edit()
+                            .remove(PREF_TRUCK_ID)
+                            .remove(PREF_TRUCK_NAME)
+                            .remove(PREF_SHIFT_SESSION_ID)
+                            .apply()
+                        activeShiftSessionId = ""
                         withContext(Dispatchers.Main) {
                             stopForeground(STOP_FOREGROUND_REMOVE)
                             stopSelfResult(startId)
@@ -239,6 +252,11 @@ class LocationTrackingService : Service() {
                 activeTruckId = restoredTruckId
                 activeTruckName = sessionPrefs.getString(PREF_TRUCK_NAME, "Water Tanker $restoredTruckId")
                     ?: "Water Tanker $restoredTruckId"
+                // Preserve the route ID if Android recreates the service mid-shift.
+                activeShiftSessionId = sessionPrefs.getString(PREF_SHIFT_SESSION_ID, null)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: UUID.randomUUID().toString()
+                sessionPrefs.edit().putString(PREF_SHIFT_SESSION_ID, activeShiftSessionId).apply()
 
                 startForeground(
                     NOTIFICATION_ID,
@@ -365,6 +383,7 @@ class LocationTrackingService : Service() {
     private suspend fun handleNewLocation(
         location: Location,
         sampleTruckId: Int,
+        sampleShiftSessionId: String,
         customStatus: String? = null
     ) {
         val truckId = sampleTruckId
@@ -394,7 +413,8 @@ class LocationTrackingService : Service() {
                 longitude = lng,
                 speedKmh = speedKmh,
                 accuracyMeters = location.accuracy,
-                timestamp = now
+                timestamp = now,
+                shiftSessionId = sampleShiftSessionId
             )
         )
         LocationSyncScheduler.enqueue(applicationContext)

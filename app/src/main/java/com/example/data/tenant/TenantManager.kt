@@ -625,6 +625,7 @@ object TenantManager {
                 speedKmh = (doc.getDouble("speedKmh") ?: 0.0).toFloat(),
                 accuracyMeters = (doc.getDouble("accuracyMeters") ?: 5.0).toFloat(),
                 timestamp = timestamp,
+                shiftSessionId = doc.getString("shiftSessionId").orEmpty(),
                 isSynced = true
             ))
         }
@@ -744,6 +745,7 @@ object TenantManager {
                 speedKmh = (doc.getDouble("speedKmh") ?: 0.0).toFloat(),
                 accuracyMeters = (doc.getDouble("accuracyMeters") ?: 5.0).toFloat(),
                 timestamp = timestamp,
+                shiftSessionId = doc.getString("shiftSessionId").orEmpty(),
                 isSynced = true
             ))
         }
