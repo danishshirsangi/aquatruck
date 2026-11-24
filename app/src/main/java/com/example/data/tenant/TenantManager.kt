@@ -625,10 +625,13 @@ object TenantManager {
                 speedKmh = (doc.getDouble("speedKmh") ?: 0.0).toFloat(),
                 accuracyMeters = (doc.getDouble("accuracyMeters") ?: 5.0).toFloat(),
                 timestamp = timestamp,
-                shiftSessionId = doc.getString("shiftSessionId").orEmpty(),
-                isSynced = true
+                isSynced = true,
+                sessionId = doc.getString("sessionId") ?: ""
             ))
         }
+
+        // Points from older builds carry no sessionId; derive it from the attendance windows.
+        dao.backfillLegacyLocationSessions()
 
         val stopCollection = root.collection("stop_records")
         val stopDocs = if (isManager) stopCollection.get().await().documents
@@ -745,10 +748,11 @@ object TenantManager {
                 speedKmh = (doc.getDouble("speedKmh") ?: 0.0).toFloat(),
                 accuracyMeters = (doc.getDouble("accuracyMeters") ?: 5.0).toFloat(),
                 timestamp = timestamp,
-                shiftSessionId = doc.getString("shiftSessionId").orEmpty(),
-                isSynced = true
+                isSynced = true,
+                sessionId = doc.getString("sessionId") ?: ""
             ))
         }
+        dao.backfillLegacyLocationSessions()
         android.util.Log.i(
             "TenantManager",
             "Refreshed live tracking for org=$orgId manager=$uid: trucks=${trucks.size()}, points=${points.size()}"

@@ -40,3 +40,9 @@ Every rule resolves access through `organizations/{orgId}/members/{uid}` (status
 - A truck and its test subscription are written in a single batch (`addTruckWithTestSubscription`).
 - A driver can read `location_points` only for the truck they currently hold: `members/{uid}.activeTruckId` must equal the point's `truckId`, and `trucks/truck_{id}` must exist with `activeDriverUid == uid` and `isShiftActive == true`.
 - Confirm the rules are deployed to the named database: `firebase deploy --only firestore:rules`.
+
+## GPS routes are per shift
+
+Every shift gets a unique `sessionId` (a UUID created in `FleetViewModel.startDriverShift` / `switchDriverTruck`). It is passed to `LocationTrackingService`, persisted in its prefs (so a service or process restart continues the same shift), stamped on every GPS point when the sample is captured, stored in Room (`location_points.sessionId`, DB version 9) and written to Firestore as `sessionId` on each `location_points` document. Late or offline-synced points therefore keep their original shift.
+
+The manager map (`buildRouteSegments`) draws one polyline per `(truckId, sessionId)` sorted by timestamp, so two shifts are never connected. History recorded before this change is assigned to a shift from the `attendance` windows (migration 8 to 9 and `backfillLegacyLocationSessions()`); points that match no window are split when consecutive points are more than 15 minutes apart. `firestore.rules` needs no change (the `location_points` rules do not restrict field names).

@@ -74,8 +74,21 @@ abstract class AppDatabase : RoomDatabase() {
 
         private val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("ALTER TABLE location_points ADD COLUMN shiftSessionId TEXT NOT NULL DEFAULT ''")
-                database.execSQL("CREATE INDEX IF NOT EXISTS index_location_points_truckId_shiftSessionId_timestamp ON location_points(truckId, shiftSessionId, timestamp)")
+                database.execSQL("ALTER TABLE location_points ADD COLUMN sessionId TEXT NOT NULL DEFAULT ''")
+                // Existing points get the shift (attendance window) they were recorded in, so
+                // history from before this update is also split per shift. Points that match no
+                // attendance window keep '' and are split by time gap when drawn.
+                database.execSQL(
+                    """
+                    UPDATE location_points SET sessionId = COALESCE((
+                        SELECT 'att_' || a.truckId || '_' || a.checkInTime FROM attendance a
+                        WHERE a.truckId = location_points.truckId
+                          AND location_points.timestamp >= a.checkInTime
+                          AND (a.checkOutTime IS NULL OR location_points.timestamp <= a.checkOutTime + 60000)
+                        ORDER BY a.checkInTime DESC LIMIT 1
+                    ), '') WHERE sessionId = ''
+                    """.trimIndent()
+                )
             }
         }
 

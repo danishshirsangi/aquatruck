@@ -178,6 +178,8 @@ fun InteractiveFleetMap(
         locations
     }
 
+    val routeSegments = remember(filteredLocations) { buildRouteSegments(filteredLocations) }
+
     val filteredStops = if (selectedTruckId != null) {
         stops.filter { it.truckId == selectedTruckId }
     } else {
@@ -363,15 +365,11 @@ fun InteractiveFleetMap(
         // ================= VECTOR OVERLAY CANVAS (ROUTES, TRUCKS, STOPS, PINS) =================
         Canvas(modifier = Modifier.fillMaxSize()) {
             // 1. Draw 7-Day Route History Polylines along the actual streets
-            // A truck has separate route histories for each driver shift.
-            val pointsByTruckAndShift = filteredLocations
-                .filter { it.latitude != 0.0 && it.longitude != 0.0 }
-                .groupBy { it.truckId to it.shiftSessionId }
-
-            pointsByTruckAndShift.forEach { (truckAndSession, unsortedPoints) ->
-                val truckId = truckAndSession.first
-                val pts = unsortedPoints.sortedBy { it.timestamp }
+            // One route per truck AND shift (sessionId). Grouping by truck alone joined the end of
+            // one shift to the start of the next with a false straight line.
+            routeSegments.forEach { pts ->
                 if (pts.size >= 2) {
+                    val truckId = pts.first().truckId
                     val color = when (truckId % 4) {
                         0 -> CyanWater
                         1 -> StatusActiveGreen

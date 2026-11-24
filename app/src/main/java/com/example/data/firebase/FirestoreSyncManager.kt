@@ -305,12 +305,12 @@ class FirestoreSyncManager(private val context: Context) {
                 "id" to point.id,
                 "driverUid" to (auth.currentUser?.uid ?: ""),
                 "truckId" to point.truckId,
+                "sessionId" to point.sessionId,
                 "latitude" to point.latitude,
                 "longitude" to point.longitude,
                 "speedKmh" to point.speedKmh,
                 "accuracyMeters" to point.accuracyMeters,
                 "timestamp" to point.timestamp,
-                "shiftSessionId" to point.shiftSessionId,
                 "expireAt" to java.util.Date(point.timestamp + 30L * 24L * 60L * 60L * 1000L)
             )
             collection("location_points").document("loc_${point.truckId}_${point.timestamp}")
@@ -336,12 +336,12 @@ class FirestoreSyncManager(private val context: Context) {
                         "id" to point.id,
                         "driverUid" to (auth.currentUser?.uid ?: ""),
                         "truckId" to point.truckId,
+                "sessionId" to point.sessionId,
                         "latitude" to point.latitude,
                         "longitude" to point.longitude,
                         "speedKmh" to point.speedKmh,
                         "accuracyMeters" to point.accuracyMeters,
                         "timestamp" to point.timestamp,
-                        "shiftSessionId" to point.shiftSessionId,
                         "expireAt" to java.util.Date(point.timestamp + 30L * 24L * 60L * 60L * 1000L)
                     )
                     batch.set(
@@ -385,12 +385,12 @@ class FirestoreSyncManager(private val context: Context) {
                         "id" to point.id,
                         "driverUid" to uid,
                         "truckId" to point.truckId,
+                "sessionId" to point.sessionId,
                         "latitude" to point.latitude,
                         "longitude" to point.longitude,
                         "speedKmh" to point.speedKmh,
                         "accuracyMeters" to point.accuracyMeters,
                         "timestamp" to point.timestamp,
-                        "shiftSessionId" to point.shiftSessionId,
                         "expireAt" to java.util.Date(point.timestamp + 30L * 24L * 60L * 60L * 1000L)
                     ), SetOptions.merge()).await()
                 ok += point.id

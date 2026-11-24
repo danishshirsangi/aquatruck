@@ -92,6 +92,18 @@ interface FleetDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLocationPoint(point: LocationPoint): Long
 
+    /** Assigns a shift id to points that have none (history from older builds) using the attendance windows. */
+    @Query("""
+        UPDATE location_points SET sessionId = COALESCE((
+            SELECT 'att_' || a.truckId || '_' || a.checkInTime FROM attendance a
+            WHERE a.truckId = location_points.truckId
+              AND location_points.timestamp >= a.checkInTime
+              AND (a.checkOutTime IS NULL OR location_points.timestamp <= a.checkOutTime + 60000)
+            ORDER BY a.checkInTime DESC LIMIT 1
+        ), '') WHERE sessionId = ''
+    """)
+    suspend fun backfillLegacyLocationSessions()
+
     @Query("SELECT * FROM location_points WHERE isSynced = 0 ORDER BY timestamp ASC LIMIT 200")
     suspend fun getPendingLocationPoints(): List<LocationPoint>
 

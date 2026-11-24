@@ -428,6 +428,8 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                     truckClaimed = true
                 }
                 val now = System.currentTimeMillis()
+                // A brand-new, unique id for THIS shift. Every GPS point of the shift carries it.
+                val sessionId = java.util.UUID.randomUUID().toString()
                 val loc = com.example.util.LocationUtils.getCurrentLocation(context)
                 val lat = loc?.latitude ?: truck.currentLat
                 val lng = loc?.longitude ?: truck.currentLng
@@ -447,15 +449,17 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                         "Your truck status could not be saved. Please try again."
                     }
                 }
-                if (lat != 0.0 || lng != 0.0) {
-                    dao.insertLocationPoint(LocationPoint(truckId = truckId, latitude = lat, longitude = lng, speedKmh = 0f, accuracyMeters = loc?.accuracy ?: 3f, timestamp = now))
+                // Only a FRESH GPS fix starts the route. Falling back to truck.currentLat/Lng would
+                // re-insert the previous shift's last position as this shift's first point.
+                if (loc != null && (loc.latitude != 0.0 || loc.longitude != 0.0)) {
+                    dao.insertLocationPoint(LocationPoint(truckId = truckId, latitude = loc.latitude, longitude = loc.longitude, speedKmh = 0f, accuracyMeters = loc.accuracy, timestamp = now, sessionId = sessionId))
                     LocationSyncScheduler.enqueue(context)
                 }
                 _loggedInTruckId.value = truckId
                 _selectedTruckId.value = truckId
                 _loggedInDriverName.value = driverName
-                sessionPrefs.edit().putInt("session_truck_id", truckId).putString("session_driver_name", driverName).putLong("session_start_time", now).apply()
-                LocationTrackingService.startService(context, truckId, truck.name)
+                sessionPrefs.edit().putInt("session_truck_id", truckId).putString("session_driver_name", driverName).putLong("session_start_time", now).putString("session_id", sessionId).apply()
+                LocationTrackingService.startService(context, truckId, truck.name, sessionId)
                 withContext(Dispatchers.Main) { onResult(true, null) }
             } catch (e: Exception) {
                 android.util.Log.e("FleetViewModel", "Unable to start driver shift", e)
@@ -498,12 +502,15 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val driverName = _loggedInDriverName.value ?: "Driver"
+            // A truck switch ends the old route and begins a new one.
+            val newSessionId = java.util.UUID.randomUUID().toString()
             _loggedInTruckId.value = newTruckId
             _selectedTruckId.value = newTruckId
             sessionPrefs.edit()
                 .putInt("session_truck_id", newTruckId)
                 .putString("session_driver_name", driverName)
                 .putLong("session_start_time", now)
+                .putString("session_id", newSessionId)
                 .apply()
 
             val location = runCatching { com.example.util.LocationUtils.getCurrentLocation(context) }.getOrNull()
@@ -532,18 +539,19 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             dao.updateTruck(activeTruck)
             firestoreSync.syncTruck(activeTruck)
 
-            if (lat != 0.0 || lng != 0.0) {
+            if (location != null && (location.latitude != 0.0 || location.longitude != 0.0)) {
                 dao.insertLocationPoint(LocationPoint(
                     truckId = newTruckId,
-                    latitude = lat,
-                    longitude = lng,
+                    latitude = location.latitude,
+                    longitude = location.longitude,
                     speedKmh = 0f,
-                    accuracyMeters = location?.accuracy ?: 5f,
-                    timestamp = now
+                    accuracyMeters = location.accuracy,
+                    timestamp = now,
+                    sessionId = newSessionId
                 ))
                 LocationSyncScheduler.enqueue(context)
             }
-            LocationTrackingService.startService(context, newTruckId, newTruck.name)
+            LocationTrackingService.startService(context, newTruckId, newTruck.name, newSessionId)
         }
     }
 
@@ -642,7 +650,8 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
             }
             // Only add a trail breadcrumb for a genuinely accurate live fix. A stale or coarse
             // position (previously labelled "3 m") drew false spikes on the manager map.
-            if (freshLocation != null &&
+            val currentSessionId = sessionPrefs.getString("session_id", "").orEmpty()
+            if (freshLocation != null && currentSessionId.isNotBlank() &&
                 (freshLocation.latitude != 0.0 || freshLocation.longitude != 0.0) &&
                 (!freshLocation.hasAccuracy() || freshLocation.accuracy <= LocationTrackingService.MAX_ACCEPTABLE_ACCURACY_METERS)
             ) {
@@ -652,7 +661,8 @@ class FleetViewModel(application: Application) : AndroidViewModel(application) {
                     longitude = lng,
                     speedKmh = 0f,
                     accuracyMeters = freshLocation.accuracy,
-                    timestamp = now
+                    timestamp = now,
+                    sessionId = currentSessionId
                 )
                 dao.insertLocationPoint(point)
                 LocationSyncScheduler.enqueue(context)

@@ -50,7 +50,6 @@ data class AttendanceRecord(
     indices = [
         Index(value = ["isSynced", "timestamp"]),
         Index(value = ["truckId", "timestamp"]),
-        Index(value = ["truckId", "shiftSessionId", "timestamp"]),
         Index(value = ["timestamp"])
     ]
 )
@@ -62,10 +61,10 @@ data class LocationPoint(
     val speedKmh: Float,
     val accuracyMeters: Float = 5f,
     val timestamp: Long = System.currentTimeMillis(),
-    /** Stable identifier for the driver's current shift; empty only for legacy rows. */
-    @ColumnInfo(defaultValue = "") val shiftSessionId: String = "",
     @ColumnInfo(defaultValue = "0") val isSynced: Boolean = false,
-    @ColumnInfo(defaultValue = "0") val retryCount: Int = 0
+    @ColumnInfo(defaultValue = "0") val retryCount: Int = 0,
+    /** Unique per shift. A route is the points of ONE (truckId, sessionId); different shifts are never joined. */
+    @ColumnInfo(defaultValue = "''") val sessionId: String = ""
 )
 
 @Entity(
